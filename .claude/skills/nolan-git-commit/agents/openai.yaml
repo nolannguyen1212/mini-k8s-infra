@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nolan Git Commit"
+  short_description: "Rebase safely and create concise conventional commits"
+  default_prompt: "Use $nolan-git-commit to prepare and create a clean conventional commit."
