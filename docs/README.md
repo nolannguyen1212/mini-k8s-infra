@@ -1,0 +1,16 @@
+# Kubernetes deep dive for backend engineers
+
+1. [Core concepts](01-concepts-core.md)
+2. [Workloads](02-concepts-workloads.md)
+3. [Networking](03-concepts-networking.md)
+4. [Storage](04-concepts-storage.md)
+5. [Config and secrets](05-concepts-config-secrets.md)
+6. [Security and RBAC](06-concepts-security-rbac.md)
+7. [Lab: cluster setup](07-lab-cluster-setup.md)
+8. [Lab: deploy go-app and js-app](08-lab-deploy-apps.md)
+9. [Helm](09-helm.md)
+10. [Vault](10-vault.md)
+11. [ArgoCD](11-argocd.md)
+12. [GitOps repo structure](12-gitops-repo-structure.md)
+13. [Cheatsheet](13-cheatsheet.md)
+14. [VPS: k3s for hosting real projects](14-vps-k3s-deploy.md)
