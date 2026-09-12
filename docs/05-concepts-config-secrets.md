@@ -5,9 +5,9 @@
 Never bake environment-specific config into a container image. Build one image, run it in dev/staging/prod with different config injected at deploy time. Kubernetes gives two objects for this:
 
 * **ConfigMap**: non-sensitive config (feature flags, URLs, log level, a full config file).
-* **Secret**: sensitive config (passwords, tokens, keys). Mechanically almost identical to ConfigMap, values are just base64 encoded, not encrypted, at rest unless you enable encryption at the etcd level or use Vault (chapter 10). Treat Secret as "marked sensitive," not as "safe."
+* **Secret**: sensitive config (passwords, tokens, keys). Mechanically almost identical to ConfigMap, values are just base64 encoded, not encrypted, at rest unless you enable encryption at the etcd level or encrypt the manifest itself before it ever reaches git (chapter 10). Treat Secret as "marked sensitive," not as "safe."
 
-Both can reach a container in two ways: as **environment variables** or as a **mounted file**. This choice is the entire story behind your Go/config.yaml vs JS/.env split, covered in 5.4 and 5.5.
+Both can reach a container in two ways: as **environment variables** or as a **mounted file**. This choice is the entire story behind why Postgres's own startup scripts arrive as mounted files while miniflux's database connection arrives as a plain environment variable, covered in 5.4 and 5.5.
 
 ## 5.2 ConfigMap
 
@@ -28,25 +28,26 @@ data:
   FEATURE_X: "on"
 ```
 
-A ConfigMap can also hold an entire file as one key, this is the pattern used for `config.yaml`:
+A ConfigMap can also hold one or more entire files as keys, this is the pattern chapter 8 uses for Postgres's own startup scripts:
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: go-app-config
+  name: postgres-init
 data:
-  config.yaml: |
-    server:
-      port: 8080
-    log_level: debug
-    feature_x: true
+  miniflux-role.sh: |
+    #!/bin/sh
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" -v rolepass="$MINIFLUX_DB_PASSWORD" <<-'EOSQL'
+    CREATE ROLE miniflux WITH LOGIN PASSWORD :'rolepass';
+    EOSQL
 ```
 
 Or generate it directly from a file, so the file itself stays the source of truth in your repo:
 
 ```sh
-kubectl create configmap go-app-config --from-file=config.yaml
+kubectl create configmap postgres-init --from-file=miniflux-role.sh
 ```
 
 ## 5.3 Secret
@@ -72,7 +73,7 @@ stringData:          # stringData accepts plain text, k8s encodes it for you on 
   API_KEY: abc123
 ```
 
-Never commit a rendered Secret (the `data:` base64 form) to git, base64 is encoding not encryption, anyone with the YAML has the plaintext. Chapter 10 (Vault) exists specifically to solve "how do I GitOps a Secret without putting the plaintext in git."
+Never commit a rendered Secret (the `data:` base64 form) to git, base64 is encoding not encryption, anyone with the YAML has the plaintext. Chapter 10 exists specifically to solve "how do I GitOps a Secret without putting the plaintext in git."
 
 Built-in Secret types worth knowing:
 
@@ -116,22 +117,17 @@ This is exactly the `.env` mental model, a flat list of `KEY=value` pairs loaded
 
 ```yaml
 volumes:
-  - name: config
+  - name: init
     configMap:
-      name: go-app-config
+      name: postgres-init
 containers:
-  - name: go-app
+  - name: postgres
     volumeMounts:
-      - name: config
-        mountPath: /etc/go-app       # config.yaml appears at /etc/go-app/config.yaml
+      - name: init
+        mountPath: /docker-entrypoint-initdb.d   # miniflux-role.sh appears here, one file per ConfigMap key
 ```
 
-This is the pattern for a Go service reading a structured `config.yaml` (viper, koanf, or a hand-rolled `yaml.Unmarshal`), because Go config libraries typically parse a file into a struct, not a flat KEY=value map. Point your app at the mounted path:
-
-```go
-viper.SetConfigFile("/etc/go-app/config.yaml")
-viper.ReadInConfig()
-```
+This is the pattern for anything that expects a real file on disk, not an environment variable, because the postgres image's own startup logic (not your code) looks for files in that exact directory. Every key in the ConfigMap becomes one file in the mounted directory, named after the key — a ConfigMap is not limited to one file per mount, chapter 9's real Postgres chart mounts several this way, one per database role it provisions.
 
 Secrets mounted as files work identically, each key in the Secret becomes a file named after the key, containing the decoded value:
 
@@ -155,16 +151,14 @@ containers:
 |---|---|---|
 | set once at container start | yes | yes, but see below |
 | app must restart to pick up a change | always | ConfigMap/Secret volumes are updated in place by kubelet (polling, up to ~1 minute delay), env vars never update without a Pod restart |
-| natural fit | flat key/value (.env style) | structured file (yaml/json/ini) |
-| Go idiom | less common | common, `config.yaml` |
-| Node idiom | common, `process.env` via `.env` | less common |
+| natural fit | flat key/value (.env style) | structured file, or something an image's own entrypoint script expects to find on disk |
 
-Practical consequence for this repo's two apps:
+Practical consequence for the two workloads chapter 8 builds:
 
-* **go-app**: ships `config.yaml`, gets it from a ConfigMap mounted as a volume at a fixed path, app parses it into a struct at startup. If you want config reload without a redeploy, the app itself must watch the file for changes (viper supports this via `WatchConfig`), the mount updates automatically, your code decides whether to react.
-* **js-app**: reads `process.env.*`, gets those values from a ConfigMap and a Secret both projected via `envFrom`, no file involved, changing a value requires a rolling restart of the Deployment (`kubectl rollout restart deployment/js-app`) because env vars are frozen at container start.
+* **postgres**: its startup scripts arrive as files mounted at `/docker-entrypoint-initdb.d`, because that is the exact mechanism the official postgres image looks for, not a choice this repo made. No amount of environment variables could substitute for it, the image's own entrypoint is what reads that directory.
+* **miniflux**: its database connection string and admin credentials arrive as plain environment variables (`DATABASE_URL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`) via `envFrom`, because that is what the miniflux binary itself reads at startup. Changing one requires the Pod to restart (`kubectl rollout restart deployment/miniflux`) because env vars are frozen at container start — chapter 8 shows this happening for real.
 
-Both are legitimate, generic patterns, not a hack: file mount for structured config that a language's ecosystem expects as a file, `envFrom` for flat config that a language's ecosystem expects as environment variables. Chapter 8 builds both end to end.
+Neither choice is up to this repo, both are dictated by what the underlying image actually expects. Recognizing which one an image needs, from its own documentation, is the actual skill, chapter 8 builds both end to end.
 
 ## 5.7 Try it
 

@@ -12,10 +12,10 @@ A Service selects Pods by label and load balances traffic across them.
 apiVersion: v1
 kind: Service
 metadata:
-  name: go-app
+  name: miniflux
 spec:
   selector:
-    app: go-app        # must match Pod labels, not Deployment name
+    app: miniflux        # must match Pod labels, not Deployment name
   ports:
     - port: 80           # port the Service listens on
       targetPort: 8080     # port the container listens on
@@ -25,8 +25,8 @@ spec:
 How it works under the hood: `kube-proxy` on every Node watches Services/Endpoints and programs iptables (or ipvs) rules so that traffic to the Service's virtual IP gets DNAT'd to one of the backing Pod IPs. There is no actual process listening on the Service IP, it is pure netfilter rewriting.
 
 ```sh
-kubectl get endpoints go-app     # the actual Pod IPs currently backing this Service
-kubectl describe svc go-app
+kubectl get endpoints miniflux     # the actual Pod IPs currently backing this Service
+kubectl describe svc miniflux
 ```
 
 If `Endpoints` is empty, the selector does not match any Pod, or matched Pods are not Ready (see readinessProbe in chapter 2). This is the most common "my Service does not work" cause.
@@ -44,9 +44,9 @@ If `Endpoints` is empty, the selector does not match any Pod, or matched Pods ar
 apiVersion: v1
 kind: Service
 metadata:
-  name: go-app-nodeport
+  name: miniflux-nodeport
 spec:
-  selector: { app: go-app }
+  selector: { app: miniflux }
   type: NodePort
   ports:
     - port: 80
@@ -55,7 +55,7 @@ spec:
 ```
 
 ```sh
-kubectl port-forward svc/go-app 8080:80   # fastest way to reach a ClusterIP Service from your laptop
+kubectl port-forward svc/miniflux 8080:80   # fastest way to reach a ClusterIP Service from your laptop
 curl localhost:8080
 ```
 
@@ -67,12 +67,12 @@ curl localhost:8080
 apiVersion: v1
 kind: Service
 metadata:
-  name: db
+  name: redis
 spec:
   clusterIP: None
-  selector: { app: db }
+  selector: { app: redis }
   ports:
-    - port: 5432
+    - port: 6379
 ```
 
 ## 3.3 Cluster DNS
@@ -83,10 +83,10 @@ CoreDNS runs in `kube-system` and resolves Service names automatically. Full for
 <service>.<namespace>.svc.cluster.local
 ```
 
-From any Pod in the same namespace, just `go-app` resolves. From a different namespace, `go-app.other-namespace` resolves. This is how a JS service talks to a Go service: by Service name, never by Pod IP.
+From any Pod in the same namespace, just `miniflux` resolves. From a different namespace, `miniflux.other-namespace` resolves, and this is exactly how miniflux (in its own namespace) reaches Postgres (in a separate `platform` namespace) by its full name, `postgres.platform.svc.cluster.local`, never by Pod IP.
 
 ```sh
-kubectl run dns-test --rm -it --image=busybox:1.36 --restart=Never -- nslookup go-app
+kubectl run dns-test --rm -it --image=busybox:1.36 --restart=Never -- nslookup miniflux
 ```
 
 ## 3.4 Ingress
@@ -107,7 +107,7 @@ kubectl wait --namespace ingress-nginx \
 
 kind needs `extraPortMappings` in its cluster config for the Ingress controller's ports to actually reach your machine, covered in chapter 7.
 
-Ingress object routing two apps by path:
+Ingress object routing to miniflux:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -119,54 +119,51 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    - host: lab.local
+    - host: miniflux.local
       http:
         paths:
-          - path: /go
+          - path: /
             pathType: Prefix
             backend:
               service:
-                name: go-app
-                port:
-                  number: 80
-          - path: /js
-            pathType: Prefix
-            backend:
-              service:
-                name: js-app
+                name: miniflux
                 port:
                   number: 80
 ```
 
 ```sh
-echo "127.0.0.1 lab.local" | sudo tee -a /etc/hosts
-curl http://lab.local/go/healthz
-curl http://lab.local/js/healthz
+echo "127.0.0.1 miniflux.local" | sudo tee -a /etc/hosts
+curl http://miniflux.local/healthcheck
 kubectl describe ingress apps
 ```
+
+Only `miniflux` ever gets an Ingress. Postgres, Redis, Kafka, and MinIO are not HTTP services and have no business being reachable from outside the cluster at all, they stay `ClusterIP`/headless-only for their entire life (chapter 8 keeps this rule, chapter 15 keeps it on the VPS too).
 
 ## 3.5 NetworkPolicy
 
 By default, every Pod can talk to every other Pod in the cluster, no restrictions. NetworkPolicy is an allowlist: once any policy selects a Pod, all traffic not explicitly allowed is denied for that Pod. Requires a CNI plugin that enforces policies (kind's default kindnet does not, you would need Calico installed for this to actually take effect, but the spec is worth knowing regardless).
 
+Postgres and miniflux end up in separate namespaces later (`platform` and `miniflux` respectively, chapter 14), so this example uses `namespaceSelector` from the start rather than teaching a same-namespace `podSelector` version first and a cross-namespace one later:
+
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: go-app-allow-from-js
+  name: postgres-allow-from-miniflux
+  namespace: platform
 spec:
   podSelector:
-    matchLabels: { app: go-app }
+    matchLabels: { app: postgres }
   policyTypes: ["Ingress"]
   ingress:
     - from:
-        - podSelector:
-            matchLabels: { app: js-app }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: miniflux }
       ports:
-        - port: 8080
+        - port: 5432
 ```
 
-This says: only Pods labeled `app: js-app` may send traffic to Pods labeled `app: go-app` on port 8080. Everything else to go-app is dropped. This is the K8s equivalent of a security group / firewall rule, and it is namespace scoped by default (add `namespaceSelector` to allow cross-namespace).
+This says: only Pods running in the namespace literally called `miniflux` may send traffic to Pods labeled `app: postgres` in the `platform` namespace, on port 5432. Everything else to Postgres is dropped, including other Pods inside `platform` itself. `kubernetes.io/metadata.name` is a label Kubernetes stamps onto every Namespace automatically, always equal to the namespace's own name, which is what lets `namespaceSelector` target "the namespace called `miniflux`" without hand-labeling anything. This is the K8s equivalent of a database security group rule. Chapter 8 applies this exact policy for real.
 
 ## 3.6 Try it
 

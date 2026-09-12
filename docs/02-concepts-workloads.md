@@ -18,12 +18,12 @@ The controller for stateless workloads. Handles rolling updates, rollback, and s
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: go-app
+  name: miniflux
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: go-app
+      app: miniflux
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -32,22 +32,22 @@ spec:
   template:                # this is a full Pod spec, embedded
     metadata:
       labels:
-        app: go-app
+        app: miniflux
     spec:
       containers:
-        - name: go-app
-          image: go-app:1.0.0
+        - name: miniflux
+          image: miniflux/miniflux:latest
           ports:
             - containerPort: 8080
           resources:
             requests: { cpu: 100m, memory: 64Mi }
             limits:   { cpu: 500m, memory: 256Mi }
           readinessProbe:
-            httpGet: { path: /healthz, port: 8080 }
+            httpGet: { path: /healthcheck, port: 8080 }
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
-            httpGet: { path: /healthz, port: 8080 }
+            httpGet: { path: /healthcheck, port: 8080 }
             initialDelaySeconds: 10
             periodSeconds: 10
 ```
@@ -61,11 +61,11 @@ Key mechanics:
 
 ```sh
 kubectl apply -f deployment.yaml
-kubectl rollout status deployment/go-app
-kubectl set image deployment/go-app go-app=go-app:1.1.0
-kubectl rollout history deployment/go-app
-kubectl rollout undo deployment/go-app
-kubectl scale deployment/go-app --replicas=5
+kubectl rollout status deployment/miniflux
+kubectl set image deployment/miniflux miniflux=miniflux/miniflux:2.1.0
+kubectl rollout history deployment/miniflux
+kubectl rollout undo deployment/miniflux
+kubectl scale deployment/miniflux --replicas=5
 ```
 
 ## 2.3 StatefulSet
@@ -83,22 +83,22 @@ Differences from Deployment:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: db
+  name: redis
 spec:
-  serviceName: db          # must match a headless Service name
-  replicas: 3
+  serviceName: redis          # must match a headless Service name
+  replicas: 1
   selector:
-    matchLabels: { app: db }
+    matchLabels: { app: redis }
   template:
     metadata:
-      labels: { app: db }
+      labels: { app: redis }
     spec:
       containers:
-        - name: db
-          image: postgres:16
+        - name: redis
+          image: redis:7-alpine
           volumeMounts:
             - name: data
-              mountPath: /var/lib/postgresql/data
+              mountPath: /data
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:
@@ -106,7 +106,7 @@ spec:
         resources: { requests: { storage: 1Gi } }
 ```
 
-As a backend engineer, the practical rule: your own stateless HTTP services are always Deployments. Reach for StatefulSet only for the datastore/broker itself, and in most real setups you would use a managed database instead of running one in-cluster.
+As a backend engineer, the practical rule: your own stateless HTTP services are always Deployments. Reach for StatefulSet only for the datastore/broker itself, and in most real setups you would use a managed database instead of running one in-cluster. Chapter 8 builds this exact object for real — Postgres, backing miniflux's Deployment — and chapter 9 charts Redis/Kafka/MinIO StatefulSets the same way, ahead of any app actually needing them yet.
 
 ## 2.4 DaemonSet
 
@@ -133,7 +133,7 @@ You rarely author these as an app developer, but you will see them (`kube-proxy`
 
 ## 2.5 Job and CronJob
 
-Job runs a Pod to completion (not forever). Used for one-off tasks: a DB migration, a batch export.
+Job runs a Pod to completion (not forever). Used for one-off tasks: a DB migration, a batch export. Miniflux itself never needs one of these (chapter 8 shows it running its own migrations in-process, via an env var, on every start instead), so this section stays illustrative with a generic image name rather than a real one from this repo:
 
 ```yaml
 apiVersion: batch/v1
@@ -147,7 +147,7 @@ spec:
       restartPolicy: Never    # Jobs cannot use Always
       containers:
         - name: migrate
-          image: go-app:1.0.0
+          image: myapp:1.0.0
           command: ["./migrate", "up"]
 ```
 
@@ -167,7 +167,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: report
-              image: go-app:1.0.0
+              image: myapp:1.0.0
               command: ["./generate-report"]
 ```
 
@@ -201,7 +201,7 @@ spec:
     podAntiAffinity:      # spread replicas across different nodes
       requiredDuringSchedulingIgnoredDuringExecution:
         - labelSelector:
-            matchLabels: { app: go-app }
+            matchLabels: { app: miniflux }
           topologyKey: kubernetes.io/hostname
   tolerations:              # allow scheduling onto tainted nodes
     - key: "dedicated"
@@ -218,12 +218,12 @@ Scales `replicas` on a Deployment/StatefulSet based on observed metrics, most co
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: go-app
+  name: miniflux
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: go-app
+    name: miniflux
   minReplicas: 2
   maxReplicas: 10
   metrics:

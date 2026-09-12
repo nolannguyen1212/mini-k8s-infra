@@ -2,22 +2,24 @@
 
 ## 6.1 ServiceAccount
 
-Every Pod runs as a ServiceAccount, `default` in its namespace if you do not specify one. This identity is what the Pod uses to talk to the Kubernetes API itself (not your app's business logic API, the Kubernetes control plane API). Most simple backend services never call the K8s API and do not need any permissions, but anything that does (a controller, an operator, a CI job running `kubectl`, Vault Agent injector, ArgoCD) authenticates as a ServiceAccount.
+Every Pod runs as a ServiceAccount, `default` in its namespace if you do not specify one. This identity is what the Pod uses to talk to the Kubernetes API itself (not your app's business logic API, the Kubernetes control plane API). Most simple backend services never call the K8s API and do not need any permissions, but anything that does (a controller, an operator, a CI job running `kubectl`, ArgoCD's own components) authenticates as a ServiceAccount.
 
 ```yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: go-app
+  name: miniflux
 ```
 
 ```yaml
 spec:
-  serviceAccountName: go-app     # set on the Pod template, defaults to "default" if omitted
+  serviceAccountName: miniflux     # set on the Pod template, defaults to "default" if omitted
   containers: [...]
 ```
 
-A token for the ServiceAccount is automatically mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token` inside every Pod unless `automountServiceAccountToken: false` is set. If your app never calls the K8s API, disable this, it is an unused credential otherwise sitting in the filesystem.
+A token for the ServiceAccount is automatically mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token` inside every Pod unless `automountServiceAccountToken: false` is set. If your app never calls the K8s API, disable this, it is an unused credential otherwise sitting in the filesystem — miniflux itself never calls the K8s API, so its ServiceAccount only exists here for the RBAC example below, in practice it would set this to `false`.
+
+ServiceAccount identity is not just for app code: chapter 13's ArgoCD is a concrete example of the same idea applied to platform tooling — its `repo-server`, `application-controller`, and `server` components each run as their own ServiceAccount, each with its own least-privilege RBAC grant, not one shared identity for "ArgoCD" as a whole.
 
 ## 6.2 Role, ClusterRole, RoleBinding, ClusterRoleBinding
 
@@ -28,7 +30,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: pod-reader
-  namespace: lab
+  namespace: miniflux
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -39,12 +41,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: go-app-pod-reader
-  namespace: lab
+  name: miniflux-pod-reader
+  namespace: miniflux
 subjects:
   - kind: ServiceAccount
-    name: go-app
-    namespace: lab
+    name: miniflux
+    namespace: miniflux
 roleRef:
   kind: Role
   name: pod-reader
@@ -55,8 +57,8 @@ roleRef:
 
 ```sh
 kubectl apply -f role.yaml -f rolebinding.yaml
-kubectl auth can-i list pods --as=system:serviceaccount:lab:go-app -n lab
-kubectl auth can-i delete deployments --as=system:serviceaccount:lab:go-app -n lab
+kubectl auth can-i list pods --as=system:serviceaccount:miniflux:miniflux -n miniflux
+kubectl auth can-i delete deployments --as=system:serviceaccount:miniflux:miniflux -n miniflux
 ```
 
 `kubectl auth can-i` is the tool for verifying RBAC before you discover it the hard way in a 403 log line.

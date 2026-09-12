@@ -9,8 +9,8 @@ set -x
 brew install kind
 
 # Create a local Kubernetes cluster
-if ! kind get clusters | grep -qx "lab"; then
-  kind create cluster --name lab
+if ! kind get clusters | grep -qx "k8s-deploy"; then
+  kind create cluster --name k8s-deploy
 fi
 
 # Verify the control plane is reachable

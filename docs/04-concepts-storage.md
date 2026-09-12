@@ -113,6 +113,8 @@ kubectl get pvc
 
 kind includes `local-path-provisioner` as the default StorageClass, backed by a directory on the kind node's disk. This is enough to practice PVC binding/mounting, it is not meant for anything you care about persisting past `kind delete cluster`.
 
+Chapters 8-9 use exactly this mechanism for real: Postgres gets a PVC by hand in chapter 8, then Redis/Kafka/MinIO get theirs via `volumeClaimTemplates` on a chart's StatefulSet in chapter 9, so a Pod restart never loses data.
+
 ## 4.5 Try it
 
 ```sh

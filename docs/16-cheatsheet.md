@@ -1,6 +1,6 @@
-# 13. Cheatsheet
+# 16. Cheatsheet
 
-## 13.1 Debugging flowchart
+## 16.1 Debugging flowchart
 
 ```
 Pod not Running?
@@ -9,8 +9,7 @@ Pod not Running?
 
   Pending            -> FailedScheduling in Events: insufficient resources, or unschedulable node
                          check: kubectl describe node <node>, kubectl top nodes
-  ImagePullBackOff    -> wrong image name/tag, private registry auth missing, or
-                         image never `kind load docker-image`-ed into this cluster
+  ImagePullBackOff    -> wrong image name/tag, private registry auth missing
   CrashLoopBackOff     -> kubectl logs <pod> --previous   (logs from the crashed instance, not the new one)
   Running but 0/1 Ready -> readinessProbe failing, kubectl describe pod, check probe path/port
 
@@ -28,19 +27,20 @@ ArgoCD app stuck OutOfSync/Degraded?
   argocd app get <app>
   argocd app diff <app>              -> exact field-level diff between git and live cluster
   kubectl describe application <app> -n argocd
+  kubectl logs -n argocd deploy/argocd-repo-server -c ksops   -> CMP render failures show up here
 
-Vault secret not injected?
-  kubectl get pods <pod> -o jsonpath='{.spec.containers[*].name}'   -> confirm agent sidecar is present
-  kubectl logs <pod> -c vault-agent-init
-  kubectl exec -it vault-0 -- vault kv get secret/<path>              -> confirm the secret actually exists
+Secret not decrypting?
+  kubectl exec -n argocd deploy/argocd-repo-server -c ksops -- ksops version   -> confirm the sidecar is even present
+  SOPS_AGE_KEY_FILE=$(pwd)/age/keys.txt sops -d apps/<app>/secrets.enc.yaml    -> confirm it decrypts locally at all
+                                                                                   (must be an ABSOLUTE path)
 ```
 
-## 13.2 kubectl commands by task
+## 16.2 kubectl commands by task
 
 ```sh
 # context and namespace
 kubectl config get-contexts
-kubectl config use-context kind-lab
+kubectl config use-context kind-k8s-deploy
 kubectl config set-context --current --namespace=<ns>
 
 # inspect
@@ -58,7 +58,6 @@ kubectl cp <pod>:/path ./local-path
 kubectl apply -f file.yaml
 kubectl delete -f file.yaml
 kubectl diff -f file.yaml           # dry-run diff against live cluster before apply
-kubectl apply -f file.yaml --dry-run=client -o yaml
 
 # deployments
 kubectl rollout status deployment/<name>
@@ -66,7 +65,6 @@ kubectl rollout history deployment/<name>
 kubectl rollout undo deployment/<name> [--to-revision=N]
 kubectl rollout restart deployment/<name>
 kubectl scale deployment/<name> --replicas=N
-kubectl set image deployment/<name> <container>=<image>:<tag>
 
 # networking
 kubectl port-forward svc/<name> <local>:<remote>
@@ -77,23 +75,44 @@ kubectl auth can-i <verb> <resource> --as=system:serviceaccount:<ns>:<sa> [-n ns
 
 # helm
 helm template <release> <chart>
+helm lint <chart>
 helm install|upgrade <release> <chart> [-f values.yaml] [--set k=v]
 helm rollback <release> <revision>
 helm history <release>
 
-# kind
-kind create cluster --name lab [--config file.yaml]
-kind load docker-image <image>:<tag> --name lab
-kind delete cluster --name lab
+# kustomize + ksops (chapters 11-12)
+kustomize build --enable-helm --enable-alpha-plugins --enable-exec --load-restrictor LoadRestrictionsNone <apps/x>
+SOPS_AGE_KEY_FILE=$(pwd)/age/keys.txt sops -e -i apps/<x>/secrets.enc.yaml
+SOPS_AGE_KEY_FILE=$(pwd)/age/keys.txt sops apps/<x>/secrets.enc.yaml   # edit in place
 
-# k3s (VPS, chapter 14)
+# argocd
+argocd app list
+argocd app get <app>
+argocd app sync <app>
+argocd app diff <app>
+
+# kind
+kind create cluster --name k8s-deploy [--config file.yaml]
+kind delete cluster --name k8s-deploy
+
+# k3s (VPS, chapter 15)
 sudo systemctl status k3s
 sudo k3s kubectl get nodes
 kubectl config use-context k3s-vps
 sudo journalctl -u k3s -f              # control plane logs, single process
+
+# postgres
+kubectl exec -it postgres-0 -n platform -- psql -U postgres -c '\l'
+kubectl exec -it postgres-0 -n platform -- psql -U postgres -c "ALTER ROLE miniflux WITH PASSWORD '...';"
+
+# redis
+kubectl exec -it redis-0 -n platform -- sh -c 'redis-cli -a "$REDIS_PASSWORD" ping'
+
+# kafka
+kubectl exec -it kafka-0 -n platform -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
-## 13.3 Glossary
+## 16.3 Glossary
 
 | Term | One line |
 |------|----------|
@@ -104,20 +123,23 @@ sudo journalctl -u k3s -f              # control plane logs, single process
 | ReplicaSet | keeps N Pods matching a label selector alive |
 | Deployment | manages ReplicaSets, adds rolling update and rollback |
 | StatefulSet | Deployment variant with stable identity and per-replica storage |
-| DaemonSet | one Pod per Node |
-| Job/CronJob | run-to-completion workloads, optionally on a schedule |
-| Service | stable virtual IP/DNS name load balancing across a set of Pods |
+| headless Service | `clusterIP: None`, no load balancing, DNS returns Pod IPs directly |
 | Ingress | layer 7 HTTP router in front of Services, needs a controller to do anything |
 | ConfigMap | non-sensitive config, consumed as env vars or mounted files |
 | Secret | sensitive config, same mechanics as ConfigMap, base64 not encrypted |
 | PV/PVC | durable storage: PV is the actual disk, PVC is a namespaced request for one |
-| StorageClass | provisioner that creates PVs on demand |
-| ServiceAccount | identity a Pod uses to authenticate to the K8s API (or Vault) |
+| ServiceAccount | identity a Pod uses to authenticate to the K8s API |
 | Role/RoleBinding | namespaced RBAC grant and its binding to a subject |
 | SecurityContext | Linux-level privilege restrictions on a Pod/container |
 | Helm chart | packaged, templated set of manifests plus default values |
-| Vault | external secret manager, secrets never live in git |
+| Kustomize | composes a rendered Helm chart with generated resources (like a decrypted Secret) into one output |
+| age | keypair-based file encryption, the backend SOPS uses here |
+| SOPS | encrypts specific fields of a file (a Secret's `data`/`stringData`) against an age key |
+| ksops | the Kustomize generator plugin that runs SOPS decryption as part of `kustomize build` |
+| Config Management Plugin (CMP) | a sidecar on `argocd-repo-server` that renders an app ArgoCD's built-in tooling can't (here: kustomize+helm+ksops together) |
 | ArgoCD | GitOps controller, reconciles cluster state to match a git repo |
+| sync wave | annotation ordering which Applications reconcile before which others |
 | reconciliation loop | observe actual state, compare to desired state, act to close the gap, repeat forever |
-| k3s | lightweight, single-binary Kubernetes distribution; used here to host real apps on one VPS (chapter 14) |
+| k3s | lightweight, single-binary Kubernetes distribution; used here to host real apps on one VPS (chapter 15) |
 | cert-manager | issues/renews TLS certificates (e.g. Let's Encrypt) from annotations on an Ingress |
+| KRaft | Kafka's own metadata-quorum mode (replaces ZooKeeper), lets a single broker Pod manage its own cluster metadata |
