@@ -5,37 +5,28 @@
 set -e
 set -x
 
-# Install Kind (skip if already installed)
-brew install kind
+CLUSTER=lab
+KIND_CONFIG="$(dirname "$0")/k8s/kind-config.yaml"
 
-# Create a local Kubernetes cluster
-if ! kind get clusters | grep -qx "k8s-deploy"; then
-  kind create cluster --name k8s-deploy
+# Install kind (skip if already installed)
+command -v kind >/dev/null || brew install kind
+
+# Create cluster with port mappings and ingress-ready label
+if ! kind get clusters | grep -qx "$CLUSTER"; then
+  kind create cluster --name "$CLUSTER" --config "$KIND_CONFIG"
 fi
 
-# Verify the control plane is reachable
+# Fail fast if the cluster was created without port 80 mapping
+docker ps --filter "name=^${CLUSTER}-control-plane$" --format '{{.Ports}}' \
+  | grep -q '0.0.0.0:80->80/tcp' || {
+    echo "Cluster '$CLUSTER' has no port 80 mapping."
+    echo "Recreate it: kind delete cluster --name $CLUSTER"
+    exit 1
+  }
+
 kubectl cluster-info
-
-# Optional: dump cluster state for debugging
-# kubectl cluster-info dump
-
-# Explore available Kubernetes API resources
-(
-  kubectl api-resources | head -n 1
-  kubectl api-resources | grep -E '^(deployments|replicasets|services|nodes)'
-)
-
-# Learn the Deployment API
-kubectl explain deployment
-
-# Inspect the Deployment spec schema
-kubectl explain deployment.spec
-
-# Verify cluster nodes
 kubectl get nodes -o wide
 
-# Verify namespaces
-kubectl get namespaces
-
-# Verify system pods
-kubectl get pods -A
+# Install ingress controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/kind/deploy.yaml
+kubectl rollout status -n ingress-nginx deploy/ingress-nginx-controller --timeout=180s
