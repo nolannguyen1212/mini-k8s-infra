@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+
+kind: StatefulSet
+
+metadata:
+  name: {{ .Release.Name }}
+
+spec:
+  serviceName: {{ .Release.Name }}
+  replicas: 1
+  selector: 
+    matchLabels: { app: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }} }
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+          envFrom:
+            - secretRef: { name: postgres-secret }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data, subPath: pgdata }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: init
+          configMap:
+            name: {{ .Release.Name }}-init
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: {{ .Values.storage }} } }

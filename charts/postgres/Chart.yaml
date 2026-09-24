@@ -1,0 +1,5 @@
+apiVersion: v2
+name: postgres
+description: Single shared PostgreSQL instance, one role+database per consuming app
+version: 0.1.0
+appVersion: "16"

@@ -1,0 +1,14 @@
+image:
+  repository: postgres
+  tag: "16-alpine"
+
+storage: 5Gi
+
+resources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { cpu: 1, memory: 1Gi }
+
+roles:
+  - name: miniflux
+    database: miniflux
+    passwordSecretKey: MINIFLUX_DB_PASSWORD
