@@ -1,0 +1,5 @@
+apiVersion: v2
+name: miniflux
+description: Miniflux RSS reader
+type: application
+version: 0.1.0

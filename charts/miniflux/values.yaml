@@ -1,0 +1,11 @@
+replicas: 1
+
+image:
+  repository: miniflux/miniflux
+  tag: "latest"
+
+host: miniflux.local
+
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits: { cpu: 250m, memory: 128Mi }
