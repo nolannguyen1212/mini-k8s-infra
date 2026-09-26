@@ -4,6 +4,7 @@ kind: ConfigMap
 
 metadata:
   name: {{ .Release.Name }}-init
+  namespace: {{ .Release.Namespace }}
 
 data:
   {{- range .Values.roles }}
