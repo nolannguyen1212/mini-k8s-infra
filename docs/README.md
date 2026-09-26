@@ -1,8 +1,9 @@
 # Kubernetes for backend engineers: operating a real deployment
 
-This docs set builds one real thing continuously on a local `kind` cluster — this repo, hosting a real app (Miniflux) on a Postgres-backed platform layer, managed with Helm, Kustomize, HashiCorp Vault, and ArgoCD. No standalone concept chapters: every Kubernetes object (Pod, Deployment, StatefulSet, Service, Ingress, ConfigMap/Secret, RBAC) is introduced at the point it's actually used, against the actual thing this repo deploys, not a throwaway example. HA, multi-node, and production/VPS operations are explicitly out of scope — the goal here is running one real stack correctly end to end, locally, first.
-
-Read in this order:
+- Deploys Miniflux (RSS reader) on a Postgres-backed platform layer, using Helm, Kustomize, HashiCorp Vault, and ArgoCD
+- Runs entirely on a local `kind` cluster
+- No standalone concept chapters — every Kubernetes object (Pod, Deployment, StatefulSet, Service, Ingress, ConfigMap/Secret, RBAC) gets introduced exactly where it's first used
+- Every example is the real thing being deployed, never a throwaway placeholder
 
 1. [Local development cluster (kind)](local-cluster-setup.md)
 2. [GitOps and the repo layout](gitops-repo-layout.md)
