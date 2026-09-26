@@ -6,7 +6,7 @@
 
 Nothing stops you from having ArgoCD point straight at `charts/postgres` with a Helm source, and for a single chart with no other moving parts that's a reasonable choice. The reason this repo uses Kustomize instead: it gives every app a single, uniform overlay shape (`apps/<name>/kustomization.yaml`) regardless of what that app needs beyond "inflate a chart" — a values override today, potentially a patch or a second generator later — without ArgoCD's `Application` object needing to know which kind of app it's looking at. One consistent rendering path, `kustomize build --enable-helm`, for everything in `apps/`.
 
-## 5.2 A first attempt, and the error it produces on purpose
+## 5.2 apps/platform/postgres/kustomization.yaml
 
 ```sh
 cat > apps/platform/postgres/kustomization.yaml <<'EOF'
@@ -24,22 +24,12 @@ helmCharts:
     namespace: platform
 EOF
 
-kustomize build --enable-helm apps/platform/postgres
-```
-
-This fails:
-
-```
-Error: security; file '/…/charts/postgres/Chart.yaml' is not in or below '/…/apps/platform/postgres'
-```
-
-Kustomize's default *load restrictor* refuses to read a file from outside the directory tree rooted at the `kustomization.yaml` itself — and `helmGlobals.chartHome: ../../../charts` does exactly that on purpose, since `apps/` and `charts/` are siblings, not one nested in the other. Rendering a local chart at all means reading its `Chart.yaml`/`templates/`/`values.yaml` from outside this directory, so this restriction has to be turned off for this repo's layout to work, period:
-
-```sh
 kustomize build --enable-helm --load-restrictor LoadRestrictionsNone apps/platform/postgres
 ```
 
-This now renders Postgres's `ConfigMap`, `Service`, and `StatefulSet`, in the `platform` namespace, exactly as chapter 4 wrote them. **This flag is not optional and not specific to Postgres** — every `apps/*` overlay in this repo has the same `../../..`-climbing `chartHome`, so this exact error and fix apply to all of them. Chapter 7 bakes this flag into the one place it needs to live permanently (ArgoCD's own kustomize build options), so it's never typed by hand again after this chapter.
+`--load-restrictor LoadRestrictionsNone` is required: kustomize's default load restrictor refuses to read any file from outside the directory tree rooted at `kustomization.yaml` itself, and `helmGlobals.chartHome: ../../../charts` does exactly that on purpose, since `apps/` and `charts/` are siblings, not one nested in the other. Rendering a local chart at all means reading its `Chart.yaml`/`templates/`/`values.yaml` from outside this directory, so the flag isn't optional for this repo's layout.
+
+This renders Postgres's `ConfigMap`, `Service`, and `StatefulSet` in the `platform` namespace, exactly as chapter 4 wrote them. **The flag applies to every `apps/*` overlay in this repo**, not just Postgres — all of them share the same `../../..`-climbing `chartHome`. Chapter 7 bakes it into the one place it needs to live permanently (ArgoCD's own kustomize build options), so it's never typed by hand again after this chapter.
 
 ## 5.3 How the local-chart inflation resolves
 
