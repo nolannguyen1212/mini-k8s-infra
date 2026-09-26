@@ -4,28 +4,7 @@ Chapters 3-7 built every piece — raw objects, a Helm chart, a Kustomize overla
 
 ## 8.1 The full reconciliation chain
 
-```d2
-commit: "Commit"
-push: "Push"
-argocd: "ArgoCD"
-render: "Render"
-apply: "Apply"
-deploy: "Deployment"
-schedule: "Scheduler"
-inject: "Vault Injector"
-init: "Init container"
-start: "Miniflux"
-
-commit -> push: "git push"
-push -> argocd: "polls, detects diff"
-argocd -> render: "kustomize build --enable-helm"
-render -> apply: "applies manifests"
-apply -> deploy: "reconciles Pod spec"
-deploy -> schedule: "places Pod on node"
-schedule -> inject: "before container starts"
-inject -> init: "adds init + sidecar"
-init -> start: "renders /vault/secrets/*, sourced then exec'd"
-```
+<img src="img/reconciliation-chain.svg" alt="The full reconciliation chain: commit pushed to git, ArgoCD polls and detects the diff, renders with kustomize build --enable-helm, applies manifests, the Deployment controller reconciles the Pod spec, the scheduler places the Pod on a node, the Vault Injector acts before the container starts, adding an init container and sidecar, and the init container renders /vault/secrets/* before Miniflux starts." width="280">
 
 `Render` is `argocd-repo-server` running `kustomize build --enable-helm --load-restrictor LoadRestrictionsNone` — the same command chapters 5 and 6 already ran by hand, no decryption step, nothing Vault-aware at this stage. `Vault Injector` is the mutating webhook rewriting the Pod at admission (chapter 6.5's role), not a step ArgoCD or kustomize knows anything about.
 
