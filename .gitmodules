@@ -1,6 +1,0 @@
-[submodule "repos/media-notes"]
-	path = repos/media-notes
-	url = git@github.com:william1nguyen/media-notes.git
-[submodule "repos/lumiere"]
-	path = repos/lumiere
-	url = git@github.com:nolannguyen1212/lumiere.git
