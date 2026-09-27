@@ -9,7 +9,9 @@
 
 ## The mechanical difference this creates
 
-A SOPS-based pipeline decrypts at **render time**: something (ArgoCD, `kustomize build`) turns an encrypted file into a plaintext `Secret` object as part of producing the manifests that get applied. Vault instead injects at **admission time**: a mutating webhook watches for a specific annotation on a Pod spec, and rewrites the Pod to add an init container (and a sidecar) that authenticates to Vault using the Pod's own identity and writes the secret to a file inside the Pod, before the main container ever starts. Nothing about `kustomize build` or ArgoCD changes because of this: [ArgoCD: git becomes the source of truth](argocd.md)'s ArgoCD install ends up simpler than a SOPS-based one would, since it never needs to hold a decryption key at all.
+- A SOPS-based pipeline decrypts at **render time**: something (ArgoCD, `kustomize build`) turns an encrypted file into a plaintext `Secret` object as part of producing the manifests that get applied
+- Vault instead injects at **admission time**: a mutating webhook watches for a specific annotation on a Pod spec, and rewrites the Pod to add an init container (and a sidecar) that authenticates to Vault using the Pod's own identity and writes the secret to a file inside the Pod, before the main container ever starts
+- Nothing about `kustomize build` or ArgoCD changes because of this: [ArgoCD: git becomes the source of truth](argocd.md)'s ArgoCD install ends up simpler than a SOPS-based one would, since it never needs to hold a decryption key at all
 
 ## Install Vault (dev mode)
 
@@ -164,8 +166,16 @@ spec:
 
 Two things worth stopping on:
 
-* **`{{`  `}}`{{`}}`` around the Vault template body.** Vault Agent's own template language (Consul Template) uses `{{ .Data.data.X }}` syntax: identical delimiters to Helm's own. Left unescaped, Helm tries to render `{{ .Data.data.POSTGRES_PASSWORD }}` itself at `helm template` time and fails (`.Data` isn't a value in Helm's context) or silently renders empty. Wrapping each `{{ ... }}` as `{{` followed by a backtick-quoted literal is Helm's own escape hatch for "treat this text as a literal string, don't parse it as a Helm action": the output written to the chart is the literal four characters `{{ .Data.data...`, which Vault Agent then parses on its own, once the file actually lands in the Pod. The exact same category of problem as [Chart Postgres](helm-charts.md#chart-postgres)'s `${{ .passwordSecretKey }}`, one layer up.
-* **`command`/`args` override.** The Vault Agent Injector does not set real environment variables: it renders `agent-inject-template-config` to a file at `/vault/secrets/config` inside the Pod, before the main container's entrypoint runs. The `postgres` image (like most images not written with Vault in mind) only reads real env vars, so the container's own command has to `source` that file first. `. /vault/secrets/config && exec docker-entrypoint.sh postgres` is that: dot-source the rendered exports, then `exec` the image's actual entrypoint so it becomes PID 1 with those vars now present in its environment.
+* **`{{`  `}}`{{`}}`` around the Vault template body.**
+  - Vault Agent's own template language (Consul Template) uses `{{ .Data.data.X }}` syntax: identical delimiters to Helm's own
+  - Left unescaped, Helm tries to render `{{ .Data.data.POSTGRES_PASSWORD }}` itself at `helm template` time and fails (`.Data` isn't a value in Helm's context) or silently renders empty
+  - Wrapping each `{{ ... }}` as `{{` followed by a backtick-quoted literal is Helm's own escape hatch for "treat this text as a literal string, don't parse it as a Helm action"
+  - The output written to the chart is the literal four characters `{{ .Data.data...`, which Vault Agent then parses on its own, once the file actually lands in the Pod
+  - The exact same category of problem as [Chart Postgres](helm-charts.md#chart-postgres)'s `${{ .passwordSecretKey }}`, one layer up
+* **`command`/`args` override.**
+  - The Vault Agent Injector does not set real environment variables: it renders `agent-inject-template-config` to a file at `/vault/secrets/config` inside the Pod, before the main container's entrypoint runs
+  - The `postgres` image (like most images not written with Vault in mind) only reads real env vars, so the container's own command has to `source` that file first
+  - `. /vault/secrets/config && exec docker-entrypoint.sh postgres` is that: dot-source the rendered exports, then `exec` the image's actual entrypoint so it becomes PID 1 with those vars now present in its environment
 
 `charts/miniflux/templates/deployment.yaml`, updated the same way: two named secrets this time, since Miniflux reads from two different Vault paths:
 
