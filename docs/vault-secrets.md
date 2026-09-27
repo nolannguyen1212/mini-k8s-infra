@@ -15,28 +15,57 @@
 
 ## Install Vault (dev mode)
 
+`scripts/vault-setup.sh`, called automatically by `make cluster` ([scripts/cluster-setup.sh](local-cluster-setup.md#scriptscluster-setupsh-and-what-it-actually-does)) — by the time you're reading this, it has likely already run once. Walk through what it actually does:
+
 ```sh
+VAULT_NS=vault
+
 helm repo add hashicorp https://helm.releases.hashicorp.com
 helm repo update
 
-kubectl create namespace vault --dry-run=client -o yaml | kubectl apply -f -
-helm install vault hashicorp/vault -n vault \
+kubectl create namespace "$VAULT_NS" --dry-run=client -o yaml | kubectl apply -f -
+
+helm upgrade --install vault hashicorp/vault -n "$VAULT_NS" \
   --set "server.dev.enabled=true" \
   --set "injector.enabled=true"
 ```
 
-`server.dev.enabled=true` runs a single Vault replica with in-memory storage, auto-unsealed, a fixed root token printed straight into the Pod's own logs: the right choice for iterating locally, wrong for anything meant to survive a restart (production mode trades this for persistent storage and a manual unseal step, deliberately out of scope here since this repo stops at local operation, not production hardening). `injector.enabled=true` is the second component this chapter depends on: the mutating admission webhook that actually rewrites Pods ([The Agent Injector annotations, and the templating-inside-templating gotcha](#the-agent-injector-annotations-and-the-templating-inside-templating-gotcha)).
+`server.dev.enabled=true` runs a single Vault replica with in-memory storage, auto-unsealed, a fixed root token printed straight into the Pod's own logs: the right choice for iterating locally, wrong for anything meant to survive a restart (production mode trades this for persistent storage and a manual unseal step, deliberately out of scope here since this repo stops at local operation, not production hardening). `injector.enabled=true` is the second component this chapter depends on: the mutating admission webhook that actually rewrites Pods ([The Agent Injector annotations, and the templating-inside-templating gotcha](#the-agent-injector-annotations-and-the-templating-inside-templating-gotcha)). `helm upgrade --install`, not plain `install`, so re-running `make cluster` against a cluster that already has Vault doesn't fail with "cannot re-use a name"; expect one harmless warning about a field-ownership conflict on the injector's webhook CA bundle on any re-run, from the injector re-asserting its own self-signed cert.
 
 ```sh
-kubectl get pods -n vault                      # vault-0 and vault-agent-injector-*, both Running
-kubectl logs -n vault vault-0 | grep "Root Token"
+kubectl wait --for=condition=Ready pod/vault-0 -n "$VAULT_NS" --timeout=180s
+kubectl rollout status deployment/vault-agent-injector -n "$VAULT_NS" --timeout=120s
 ```
+
+Two different readiness checks for two different resources, on purpose. `vault-agent-injector` is a plain Deployment with the default `RollingUpdate` strategy, so `kubectl rollout status` works on it. `vault` is a StatefulSet, but the Vault chart sets its update strategy to `OnDelete` (Vault Pods need a human to unseal them after a restart, so nothing should roll them automatically) — `kubectl rollout status` refuses to run at all against a non-`RollingUpdate` StatefulSet (`error: rollout status is only available for RollingUpdate strategy type`). `kubectl wait --for=condition=Ready` sidesteps that entirely: it just polls the Pod's own readiness condition, which is exactly "has Vault finished starting and auto-unsealing" in dev mode.
+
+```sh
+kubectl exec -n "$VAULT_NS" vault-0 -- vault status
+```
+`Sealed: false` confirms dev mode is actually usable.
+
+Vault also needs to know how to trust a Pod's identity, before any app can authenticate to it. The `kubernetes` auth method verifies a Pod's own ServiceAccount token against the cluster's API:
+
+```sh
+kubectl exec -n "$VAULT_NS" vault-0 -- vault auth enable kubernetes
+```
+
+This is the one non-idempotent line in the whole chain — it's the exact reason [scripts/cluster-setup.sh drops `-e`](local-cluster-setup.md#scriptscluster-setupsh-and-what-it-actually-does): it errors with "path is already in use" on every run after the first, and that's fine, nothing after it depends on *this* run having enabled it.
+
+```sh
+kubectl exec -n "$VAULT_NS" vault-0 -- sh -c \
+  'vault write auth/kubernetes/config kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT"'
+```
+
+`$KUBERNETES_SERVICE_HOST`/`$KUBERNETES_SERVICE_PORT` only exist as environment variables **inside a running Pod** (every Pod gets them injected automatically, pointing at the cluster's own apiserver). Wrapping the `vault write` in `sh -c '...'` (single-quoted) is what makes those two variables expand *inside* `vault-0` after `kubectl exec` has already placed you there, not on your laptop, where they don't exist at all and would silently expand to nothing, writing a broken `kubernetes_host`.
+
+Confirm it end to end from your own machine, outside the script:
 
 ```sh
 kubectl port-forward -n vault svc/vault 8200:8200 &
 export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_TOKEN=<root token from above>
-vault status                                    # Sealed: false, confirms dev mode is actually usable
+export VAULT_TOKEN=<root token from `kubectl logs -n vault vault-0 | grep "Root Token"`>
+vault status                                    # Sealed: false
 ```
 
 ## Write the secrets
@@ -57,43 +86,34 @@ vault kv get secret/platform/postgres
 
 Notice `DATABASE_URL` is not written anywhere: [The Agent Injector annotations, and the templating-inside-templating gotcha](#the-agent-injector-annotations-and-the-templating-inside-templating-gotcha) composes it inside the Pod, at injection time, directly from `secret/platform/postgres`'s `MINIFLUX_DB_PASSWORD`. That's the specific thing that removes [The first real objects, by hand](first-objects-by-hand.md)'s two-copies-of-one-password problem: Miniflux's Vault Agent reads the **same path** Postgres's does, instead of a second, independently-maintained copy of the value.
 
-## The Kubernetes auth method
-
-Vault needs to know how to trust a Pod's identity. The `kubernetes` auth method verifies a Pod's own ServiceAccount token against the cluster's API: run this from inside `vault-0` itself, the most reliable way to get the in-cluster host/CA right without fighting TLS from your laptop:
-
-```sh
-kubectl exec -it vault-0 -n vault -- vault auth enable kubernetes
-
-kubectl exec -it vault-0 -n vault -- vault write auth/kubernetes/config \
-  kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT"
-```
-
 ## Policies and roles, scoped per app
 
-A policy grants read on a specific KV path. A role binds a Kubernetes ServiceAccount identity (namespace + name) to a policy: this is what actually authorizes a given Pod to read a given secret, nothing broader:
+A policy grants read on a specific KV path. A role binds a Kubernetes ServiceAccount identity (namespace + name) to a policy: this is what actually authorizes a given Pod to read a given secret, nothing broader. Both policies are tracked files, not typed by hand each time: `config/vault/policies/postgres-policy.hcl` and `config/vault/policies/miniflux-policy.hcl`:
 
-```sh
-cat > postgres-policy.hcl <<'EOF'
+```hcl
+# config/vault/policies/postgres-policy.hcl
 path "secret/data/platform/postgres" {
   capabilities = ["read"]
 }
-EOF
+```
 
-cat > miniflux-policy.hcl <<'EOF'
+```hcl
+# config/vault/policies/miniflux-policy.hcl
 path "secret/data/platform/postgres" {
   capabilities = ["read"]
 }
 path "secret/data/miniflux" {
   capabilities = ["read"]
 }
-EOF
 ```
 
 Miniflux's policy includes Postgres's own path on purpose: it needs to read `MINIFLUX_DB_PASSWORD` directly to compose its `DATABASE_URL` (see [Write the secrets](#write-the-secrets)). This is the mechanism, not a mistake: two apps can share a read path in Vault the same way they can share a K8s `Secret`, except each grant is explicit and auditable per role instead of implied by which Pods happen to mount which object.
 
+Unlike Vault's own install, registering an app's policy and role is done by hand, per app, when that app is actually deployed — not part of `make cluster`'s generic bootstrap; there's no app to scope a policy to before then:
+
 ```sh
-kubectl cp postgres-policy.hcl vault/vault-0:/tmp/postgres-policy.hcl
-kubectl cp miniflux-policy.hcl vault/vault-0:/tmp/miniflux-policy.hcl
+kubectl cp config/vault/policies/postgres-policy.hcl vault/vault-0:/tmp/postgres-policy.hcl
+kubectl cp config/vault/policies/miniflux-policy.hcl vault/vault-0:/tmp/miniflux-policy.hcl
 kubectl exec -it vault-0 -n vault -- vault policy write postgres /tmp/postgres-policy.hcl
 kubectl exec -it vault-0 -n vault -- vault policy write miniflux /tmp/miniflux-policy.hcl
 

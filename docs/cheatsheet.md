@@ -79,7 +79,7 @@
 
 | Command | Notes |
 |---|---|
-| `kind create cluster --name lab [--config k8s/kind-config.yaml]` | bring the local cluster up |
+| `kind create cluster --name lab [--config config/kind/kind-config.yaml]` | bring the local cluster up |
 | `kind delete cluster --name lab` | tear it down |
 
 ## Postgres
