@@ -4,10 +4,10 @@
 
 | Symptom | Check | Meaning |
 |---|---|---|
-| Pod not `Running` | `kubectl get pods -o wide` | first pass — which Pod, which node, which state |
+| Pod not `Running` | `kubectl get pods -o wide` | first pass: which Pod, which node, which state |
 | Pod not `Running` | `kubectl describe pod <name>` | read Events at the bottom, this is 90% of debugging |
 | `Pending` | `kubectl describe node <node>`, `kubectl top nodes` | `FailedScheduling` in Events: insufficient resources, or an unschedulable node |
-| `ImagePullBackOff` | — | wrong image name/tag, or private registry auth missing |
+| `ImagePullBackOff` | N/A | wrong image name/tag, or private registry auth missing |
 | `CrashLoopBackOff` | `kubectl logs <pod> --previous` | logs from the crashed instance, not the new one |
 | `Init:0/1` stuck | see "Secret not injected" rows below | the Vault Agent init container never completed |
 | Running but `0/1 Ready` | `kubectl describe pod`, check probe path/port | readinessProbe failing |
@@ -51,7 +51,7 @@
 
 | Command | Notes |
 |---|---|
-| `kustomize build --enable-helm --load-restrictor LoadRestrictionsNone <apps/x>` | chapter 5 — required flags for every `apps/*` overlay in this repo |
+| `kustomize build --enable-helm --load-restrictor LoadRestrictionsNone <apps/x>` | [Kustomize inflating a Helm chart](kustomize-helm-inflation.md): required flags for every `apps/*` overlay in this repo |
 
 ## Vault
 
@@ -103,7 +103,7 @@
 | headless Service | `clusterIP: None`, no load balancing, DNS returns Pod IPs directly |
 | Ingress | layer 7 HTTP router in front of Services, needs a controller to do anything |
 | ConfigMap | non-sensitive config, consumed as env vars or mounted files |
-| Secret | sensitive config, same mechanics as ConfigMap, base64 not encrypted — not used for app secrets in this repo (Vault is) |
+| Secret | sensitive config, same mechanics as ConfigMap, base64 not encrypted; not used for app secrets in this repo (Vault is) |
 | PV/PVC | durable storage: PV is the actual disk, PVC is a namespaced request for one |
 | ServiceAccount | identity a Pod uses to authenticate to the K8s API, and (here) to Vault |
 | Role/RoleBinding | namespaced RBAC grant and its binding to a subject |

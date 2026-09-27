@@ -1,10 +1,12 @@
-# 3. The first real objects, by hand
+# The first real objects, by hand
 
-One real app — [Miniflux](https://miniflux.app), an RSS reader, official public image `miniflux/miniflux` — backed by one real Postgres instance. Both by hand, raw YAML, no Helm yet (chapter 4 charts these same objects). This is the concrete implementation of everything that follows: a `Secret` mounted as env vars, a `StatefulSet` for the one workload that actually needs stable per-replica storage, a headless `Service` for its DNS, and an `Ingress` to reach Miniflux from outside the cluster.
+- One real app: [Miniflux](https://miniflux.app), an RSS reader, official public image `miniflux/miniflux`, backed by one real Postgres instance
+- Both by hand, raw YAML, no Helm yet ([Helm: charting Postgres and Miniflux](helm-charts.md) charts these same objects)
+- The concrete implementation of everything that follows: a `Secret` mounted as env vars, a `StatefulSet` for the one workload that actually needs stable per-replica storage, a headless `Service` for its DNS, and an `Ingress` to reach Miniflux from outside the cluster
+- Each app gets its own directory under `k8s/`, with its own `Namespace` object living right alongside its other manifests, and its own `kustomization.yaml` listing them: this is what turns five-plus individual `kubectl apply -f` calls into one `kubectl apply -k`
+- No Helm chart, no chart-inflation involved yet: `resources:` here is Kustomize's plainest feature, just "apply this list of files together"
 
-Each app gets its own directory under `k8s/`, with its own `Namespace` object living right alongside its other manifests, and its own `kustomization.yaml` listing them — this is what turns five-plus individual `kubectl apply -f` calls into one `kubectl apply -k`. No Helm chart, no chart-inflation involved yet — `resources:` here is Kustomize's plainest feature, just "apply this list of files together."
-
-## 3.1 Postgres
+## Postgres
 
 ```sh
 mkdir -p k8s/platform/postgres
@@ -19,7 +21,7 @@ metadata:
   name: platform
 ```
 
-`k8s/platform/postgres/secret.yaml` — plaintext for now, on purpose: chapter 6 (Vault) replaces this exact file with something that never has a plaintext value sitting in git or on disk, but seeing the plain version first is what makes the problem it solves concrete instead of abstract:
+`k8s/platform/postgres/secret.yaml`: plaintext for now, on purpose. [Vault: secrets as a live service, not a file in git](vault-secrets.md) replaces this exact file with something that never has a plaintext value sitting in git or on disk, but seeing the plain version first is what makes the problem it solves concrete instead of abstract:
 
 ```yaml
 apiVersion: v1
@@ -33,9 +35,9 @@ stringData:
   MINIFLUX_DB_PASSWORD: dev-miniflux-db-password
 ```
 
-A `Secret`'s `data`/`stringData` is base64, not encrypted — anyone who can read this object (or this file, or git history) has the credential in cleartext. That's the entire reason chapter 6 exists.
+A `Secret`'s `data`/`stringData` is base64, not encrypted: anyone who can read this object (or this file, or git history) has the credential in cleartext. That's the entire reason [Vault: secrets as a live service, not a file in git](vault-secrets.md) exists.
 
-`k8s/platform/postgres/configmap.yaml` — a `ConfigMap` mounted as a directory of files inside the container (`/docker-entrypoint-initdb.d`, the Postgres image's own convention for first-boot init scripts), rather than a single env var. The password itself is read from an environment variable (from the `Secret` above via `envFrom`) and handed to `psql` as a bind variable, never spliced into the SQL text itself. `CREATE ROLE ... IF NOT EXISTS` doesn't exist in Postgres, and a `DO $$ ... $$` PL/pgSQL block is one way around that — but the simpler, dependency-free way is generating the `CREATE ROLE` statement itself as text and only running it conditionally, via `\gexec`:
+`k8s/platform/postgres/configmap.yaml`: a `ConfigMap` mounted as a directory of files inside the container (`/docker-entrypoint-initdb.d`, the Postgres image's own convention for first-boot init scripts), rather than a single env var. The password itself is read from an environment variable (from the `Secret` above via `envFrom`) and handed to `psql` as a bind variable, never spliced into the SQL text itself. `CREATE ROLE ... IF NOT EXISTS` doesn't exist in Postgres, and a `DO $$ ... $$` PL/pgSQL block is one way around that, but the simpler, dependency-free way is generating the `CREATE ROLE` statement itself as text and only running it conditionally, via `\gexec`:
 
 ```yaml
 apiVersion: v1
@@ -56,9 +58,9 @@ data:
     EOSQL
 ```
 
-Read the two `\gexec` lines as one unit each: `SELECT format(...) WHERE NOT EXISTS (...)` produces either zero rows (role/database already exists, nothing to do) or exactly one row containing a ready-to-run `CREATE ROLE`/`CREATE DATABASE` statement as text; `\gexec` then executes whatever text that query just returned, or executes nothing at all if it returned no rows. `format('...%L', :'rolepass')` is what safely quotes the password into that generated statement — `%L` is `format()`'s own "quote this as a SQL literal" verb, doing for the *generated* statement what `:'rolepass'` already does for the *outer* one. `<<-'EOSQL'` (a **quoted** heredoc delimiter) disables all shell expansion inside the block, so none of this SQL punctuation is touched by the shell before `psql` ever sees it.
+Read the two `\gexec` lines as one unit each: `SELECT format(...) WHERE NOT EXISTS (...)` produces either zero rows (role/database already exists, nothing to do) or exactly one row containing a ready-to-run `CREATE ROLE`/`CREATE DATABASE` statement as text; `\gexec` then executes whatever text that query just returned, or executes nothing at all if it returned no rows. `format('...%L', :'rolepass')` is what safely quotes the password into that generated statement: `%L` is `format()`'s own "quote this as a SQL literal" verb, doing for the *generated* statement what `:'rolepass'` already does for the *outer* one. `<<-'EOSQL'` (a **quoted** heredoc delimiter) disables all shell expansion inside the block, so none of this SQL punctuation is touched by the shell before `psql` ever sees it.
 
-`k8s/platform/postgres/statefulset.yaml`. A `StatefulSet` (not a `Deployment`) because Postgres needs two things a `Deployment` doesn't give: a stable identity (`postgres-0`, always the same name across restarts) and its own dedicated storage that reattaches to that same identity on every restart — a `Deployment`'s Pods are interchangeable by design, which is wrong for a database:
+`k8s/platform/postgres/statefulset.yaml`. A `StatefulSet` (not a `Deployment`) because Postgres needs two things a `Deployment` doesn't give: a stable identity (`postgres-0`, always the same name across restarts) and its own dedicated storage that reattaches to that same identity on every restart. A `Deployment`'s Pods are interchangeable by design, which is wrong for a database:
 
 ```yaml
 apiVersion: apps/v1
@@ -109,9 +111,9 @@ spec:
         resources: { requests: { storage: 5Gi } }
 ```
 
-`volumeClaimTemplates` is the StatefulSet-specific mechanism: unlike a `Deployment`'s shared `volumes:`, each replica gets its **own** `PersistentVolumeClaim` (`data-postgres-0`, `data-postgres-1`, ...), created once and reattached to the same Pod identity on every restart — the actual reason a database needs a StatefulSet at all.
+`volumeClaimTemplates` is the StatefulSet-specific mechanism: unlike a `Deployment`'s shared `volumes:`, each replica gets its **own** `PersistentVolumeClaim` (`data-postgres-0`, `data-postgres-1`, ...), created once and reattached to the same Pod identity on every restart: the actual reason a database needs a StatefulSet at all.
 
-`k8s/platform/postgres/service.yaml` — headless (`clusterIP: None`): a normal `Service` load-balances across replicas and hides which specific Pod you hit, which is wrong for a StatefulSet where identity matters. A headless `Service` instead gives DNS a distinct name per Pod (`postgres-0.postgres.platform.svc.cluster.local`), which is what a StatefulSet needs to be addressable at all:
+`k8s/platform/postgres/service.yaml`: headless (`clusterIP: None`). A normal `Service` load-balances across replicas and hides which specific Pod you hit, which is wrong for a StatefulSet where identity matters. A headless `Service` instead gives DNS a distinct name per Pod (`postgres-0.postgres.platform.svc.cluster.local`), which is what a StatefulSet needs to be addressable at all:
 
 ```yaml
 apiVersion: v1
@@ -126,7 +128,7 @@ spec:
     - port: 5432
 ```
 
-`k8s/platform/postgres/networkpolicy.yaml` — by default every Pod in the cluster can reach every other Pod; this scopes Postgres down to accepting connections from the `miniflux` namespace only, nothing else:
+`k8s/platform/postgres/networkpolicy.yaml`: by default every Pod in the cluster can reach every other Pod; this scopes Postgres down to accepting connections from the `miniflux` namespace only, nothing else:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -146,9 +148,9 @@ spec:
         - port: 5432
 ```
 
-Note kind's default CNI (kindnet) does **not** enforce `NetworkPolicy` — this object is correct, but on a stock kind cluster it applies without error yet blocks nothing. Worth knowing before assuming a local test proves more than it does — a CNI that actually enforces `NetworkPolicy` would genuinely block the traffic this object describes; kind's doesn't.
+Note kind's default CNI (kindnet) does **not** enforce `NetworkPolicy`: this object is correct, but on a stock kind cluster it applies without error yet blocks nothing. Worth knowing before assuming a local test proves more than it does: a CNI that actually enforces `NetworkPolicy` would genuinely block the traffic this object describes; kind's doesn't.
 
-`k8s/platform/postgres/kustomization.yaml` — the file that turns the five objects above into one `kubectl apply -k`:
+`k8s/platform/postgres/kustomization.yaml`: the file that turns the five objects above into one `kubectl apply -k`:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -169,7 +171,7 @@ kubectl get pvc -n platform                                   # data-postgres-0,
 kubectl exec -it postgres-0 -n platform -- psql -U postgres -c '\l'   # confirm the "miniflux" database exists
 ```
 
-## 3.2 Miniflux
+## Miniflux
 
 ```sh
 mkdir -p k8s/miniflux
@@ -184,7 +186,7 @@ metadata:
   name: miniflux
 ```
 
-`k8s/miniflux/secret.yaml` — same plaintext-for-now caveat as 3.1. Note the password inside `DATABASE_URL` has to be the exact same value as `postgres-secret`'s `MINIFLUX_DB_PASSWORD` above, since they authenticate the same role. Chapter 6.4 explains how Vault removes the need to keep two separate copies of this value in sync at all:
+`k8s/miniflux/secret.yaml`: same plaintext-for-now caveat as [Postgres](#postgres) above. Note the password inside `DATABASE_URL` has to be the exact same value as `postgres-secret`'s `MINIFLUX_DB_PASSWORD` above, since they authenticate the same role. [Vault: secrets as a live service, not a file in git](vault-secrets.md#write-the-secrets) explains how Vault removes the need to keep two separate copies of this value in sync at all:
 
 ```yaml
 apiVersion: v1
@@ -199,7 +201,7 @@ stringData:
   ADMIN_PASSWORD: dev-admin-password
 ```
 
-`k8s/miniflux/deployment.yaml` — a plain `Deployment` this time: Miniflux is stateless (all its state is in Postgres), so replicas are fully interchangeable, no stable identity or per-replica storage needed. `RUN_MIGRATIONS=1` and `CREATE_ADMIN=1` tell Miniflux to run its own schema migrations and bootstrap the admin account on every start — both are idempotent, safe to leave set permanently:
+`k8s/miniflux/deployment.yaml`: a plain `Deployment` this time. Miniflux is stateless (all its state is in Postgres), so replicas are fully interchangeable, no stable identity or per-replica storage needed. `RUN_MIGRATIONS=1` and `CREATE_ADMIN=1` tell Miniflux to run its own schema migrations and bootstrap the admin account on every start: both are idempotent, safe to leave set permanently:
 
 ```yaml
 apiVersion: apps/v1
@@ -239,7 +241,7 @@ spec:
             periodSeconds: 15
 ```
 
-If `/healthcheck` doesn't match Miniflux's actual current health endpoint by the time you're reading this, check the running container's logs on first boot and fix the one path, nothing else about this Deployment changes — the same caveat applies to any specific path/env-var name for a public image you didn't write: trust the image's own docs and logs over any page describing it, this one included.
+If `/healthcheck` doesn't match Miniflux's actual current health endpoint by the time you're reading this, check the running container's logs on first boot and fix the one path, nothing else about this Deployment changes. The same caveat applies to any specific path/env-var name for a public image you didn't write: trust the image's own docs and logs over any page describing it, this one included.
 
 `k8s/miniflux/service.yaml`:
 
@@ -255,7 +257,7 @@ spec:
     - { port: 80, targetPort: 8080 }
 ```
 
-`k8s/miniflux/ingress.yaml` — `miniflux.local` already resolves to your host via chapter 1.3's `/etc/hosts` line and ingress-nginx is already installed:
+`k8s/miniflux/ingress.yaml`: `miniflux.local` already resolves to your host via [Local development cluster (kind)](local-cluster-setup.md#cluster-config-for-later-chapters)'s `/etc/hosts` line and ingress-nginx is already installed:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -293,7 +295,7 @@ kubectl apply -k k8s/miniflux
 kubectl rollout status deployment/miniflux -n miniflux
 ```
 
-## 3.3 Verify end to end
+## Verify end to end
 
 ```sh
 curl http://miniflux.local/healthcheck
@@ -301,7 +303,7 @@ curl http://miniflux.local/healthcheck
 kubectl exec deploy/miniflux -n miniflux -- printenv | grep DATABASE_URL   # confirm it points at postgres.platform.svc.cluster.local
 ```
 
-Log into Miniflux at `http://miniflux.local` in a browser with the `ADMIN_USERNAME`/`ADMIN_PASSWORD` from 3.2, confirming the whole chain actually works, not just that the Pods are `Running`.
+Log into Miniflux at `http://miniflux.local` in a browser with the `ADMIN_USERNAME`/`ADMIN_PASSWORD` from [Miniflux](#miniflux) above, confirming the whole chain actually works, not just that the Pods are `Running`.
 
 ```sh
 # PVC survives a Pod restart, the entire point of a StatefulSet over a Deployment
@@ -311,14 +313,14 @@ kubectl exec -it postgres-0 -n platform -- psql -U postgres -c '\l'   # miniflux
 curl http://miniflux.local/healthcheck    # still fine, miniflux's own connection recovers
 ```
 
-## 3.4 Cleanup
+## Cleanup
 
 ```sh
 kubectl delete -k k8s/miniflux
 kubectl delete -k k8s/platform/postgres
 ```
 
-`kubectl delete statefulset` does not delete its PVC by default — this is deliberate (StatefulSet storage outlives the workload on purpose). Delete it explicitly if you actually want the data gone:
+`kubectl delete statefulset` does not delete its PVC by default: this is deliberate (StatefulSet storage outlives the workload on purpose). Delete it explicitly if you actually want the data gone:
 
 ```sh
 kubectl delete pvc data-postgres-0 -n platform

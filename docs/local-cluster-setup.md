@@ -1,16 +1,17 @@
-# 1. Local development cluster (kind)
+# Local development cluster (kind)
 
-Everything in this docs set runs on a local `kind` cluster. This is not a disposable exercise environment, it's just where the actual repo gets built and iterated on fastest.
+- Runs on a local `kind` cluster for the whole docs set
+- Not a disposable exercise environment: this is where the actual repo gets built and iterated on fastest
 
-## 1.1 What kind actually is
+## What kind actually is
 
 kind (Kubernetes IN Docker) runs each cluster "node" as a Docker container, with Kubernetes installed inside it. One control-plane container is enough for everything here. It is not a lightweight VM and not minikube, it is genuinely upstream Kubernetes, just packaged to boot in seconds on your laptop using Docker as the substrate instead of a VM or bare metal.
 
-**Why kind over minikube:** minikube runs the cluster inside a VM (or a single Docker container in driver=docker mode) and ships its own wrapper CLI, addon system, and mostly-single-node model — more moving parts, more magic hidden from you. kind is just Docker containers plus stock upstream Kubernetes, so `kubectl` behaves exactly like it would against any real cluster, multi-node configs are one YAML file away, and cluster boot/teardown is fast enough to do many times a day. Neither is "more real" than the other for API purposes, but kind's lower ceremony is why it's used here and why it's the more common choice in CI pipelines — a transferable skill, not a toy.
+**Why kind over minikube:** minikube runs the cluster inside a VM (or a single Docker container in driver=docker mode) and ships its own wrapper CLI, addon system, and mostly-single-node model: more moving parts, more magic hidden from you. kind is just Docker containers plus stock upstream Kubernetes, so `kubectl` behaves exactly like it would against any real cluster, multi-node configs are one YAML file away, and cluster boot/teardown is fast enough to do many times a day. Neither is "more real" than the other for API purposes, but kind's lower ceremony is why it's used here and why it's the more common choice in CI pipelines: a transferable skill, not a toy.
 
-## 1.2 create-cluster.sh, and what it actually does
+## create-cluster.sh, and what it actually does
 
-Everything from chapter 2 onward is a file inside this same repo — `k8s/`, `charts/`, `apps/` at the root, no separate repo to `git init`. `create-cluster.sh`/`common.sh`, already at this repo's root, are what actually bring the cluster up; walk through what they do once, rather than typing the same commands by hand:
+Everything from [GitOps and the repo layout](gitops-repo-layout.md) onward is a file inside this same repo (`k8s/`, `charts/`, `apps/` at the root, no separate repo to `git init`). `create-cluster.sh`/`common.sh`, already at this repo's root, are what actually bring the cluster up; walk through what they do once, rather than typing the same commands by hand:
 
 ```sh
 . "$(dirname "$0")/common.sh"
@@ -29,7 +30,7 @@ KIND_CONFIG="$(dirname "$0")/k8s/kind-config.yaml"
 
 command -v kind >/dev/null || brew install kind
 ```
-The cluster is named `lab` throughout this repo's scripts — not the name of anything being deployed, just this local sandbox's own identity. `kind-config.yaml` lives at `k8s/kind-config.yaml` (1.3), not the repo root.
+The cluster is named `lab` throughout this repo's scripts: not the name of anything being deployed, just this local sandbox's own identity. `kind-config.yaml` lives at `k8s/kind-config.yaml` (see [Cluster config for later chapters](#cluster-config-for-later-chapters)), not the repo root.
 
 ```sh
 if ! kind get clusters | grep -qx "$CLUSTER"; then
@@ -46,17 +47,17 @@ docker ps --filter "name=^${CLUSTER}-control-plane$" --format '{{.Ports}}' \
     exit 1
   }
 ```
-A real failure mode worth guarding against explicitly: if `kind-config.yaml`'s `extraPortMappings` (1.3) ever get dropped — an edit that removes them, or a cluster created without `--config` at all — the cluster comes up looking healthy, and only later, silently, ingress-nginx becomes unreachable from the host. Checking the actual Docker port mapping right after creation turns that into a loud, immediate failure instead.
+A real failure mode worth guarding against explicitly: if `kind-config.yaml`'s `extraPortMappings` (see [Cluster config for later chapters](#cluster-config-for-later-chapters)) ever get dropped (an edit that removes them, or a cluster created without `--config` at all), the cluster comes up looking healthy, and only later, silently, ingress-nginx becomes unreachable from the host. Checking the actual Docker port mapping right after creation turns that into a loud, immediate failure instead.
 
 ```sh
 kubectl cluster-info
 kubectl get nodes -o wide
 ```
-Confirms the apiserver is reachable and prints its URL — the first sanity check after any cluster creation.
+Confirms the apiserver is reachable and prints its URL: the first sanity check after any cluster creation.
 
-## 1.3 Cluster config for later chapters
+## Cluster config for later chapters
 
-The default `kind create cluster` has no port mappings, so an Ingress controller inside it is unreachable from your host machine. Miniflux's Ingress (chapter 3) needs `extraPortMappings`. `k8s/kind-config.yaml`:
+The default `kind create cluster` has no port mappings, so an Ingress controller inside it is unreachable from your host machine. Miniflux's Ingress ([The first real objects, by hand](first-objects-by-hand.md)) needs `extraPortMappings`. `k8s/kind-config.yaml`:
 
 ```yaml
 kind: Cluster
@@ -81,9 +82,9 @@ kubectl cluster-info
 kubectl get nodes -o wide
 ```
 
-`extraPortMappings` forwards ports from your host straight into the kind node container — this is what lets `curl http://miniflux.local/...` on your laptop reach the ingress-nginx controller running inside the cluster.
+`extraPortMappings` forwards ports from your host straight into the kind node container: this is what lets `curl http://miniflux.local/...` on your laptop reach the ingress-nginx controller running inside the cluster.
 
-Install ingress-nginx now, kind's own manifest variant (uses the `extraPortMappings` above instead of a cloud LoadBalancer). Pin an exact controller release instead of `main` — an unpinned branch reference can change out from under you between two runs of the same command, on a manifest you're applying straight from the internet:
+Install ingress-nginx now, kind's own manifest variant (uses the `extraPortMappings` above instead of a cloud LoadBalancer). Pin an exact controller release instead of `main`, since an unpinned branch reference can change out from under you between two runs of the same command on a manifest you're applying straight from the internet:
 
 ```sh
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/kind/deploy.yaml
@@ -91,7 +92,7 @@ kubectl rollout status -n ingress-nginx deploy/ingress-nginx-controller --timeou
 echo "127.0.0.1 miniflux.local" | sudo tee -a /etc/hosts
 ```
 
-## 1.4 Cluster-level exploration
+## Cluster-level exploration
 
 ```sh
 kubectl get nodes -o wide
@@ -101,18 +102,18 @@ kubectl version
 kubectl api-resources
 ```
 
-`kubectl get pods -n kube-system` shows the control plane components actually running as Pods (`etcd`, `kube-apiserver`, `kube-controller-manager`, `kube-scheduler`, `coredns`, `kindnet`, `kube-proxy`) — a concrete look at what "the cluster" is actually made of underneath `kubectl`.
+`kubectl get pods -n kube-system` shows the control plane components actually running as Pods (`etcd`, `kube-apiserver`, `kube-controller-manager`, `kube-scheduler`, `coredns`, `kindnet`, `kube-proxy`): a concrete look at what "the cluster" is actually made of underneath `kubectl`.
 
-## 1.5 Cleanup and reset
+## Cleanup and reset
 
 ```sh
 kind get clusters
 kind delete cluster --name lab      # destroys everything, start clean
 ```
 
-kind clusters are cheap and disposable even though the repo they build isn't: when the *cluster* gets into a confusing state from experimentation, deleting and recreating it is often faster than debugging it. Nothing about the repo itself is lost — `kubectl apply`/`helm install`/ArgoCD sync just run again against a fresh cluster.
+kind clusters are cheap and disposable even though the repo they build isn't: when the *cluster* gets into a confusing state from experimentation, deleting and recreating it is often faster than debugging it. Nothing about the repo itself is lost: `kubectl apply`/`helm install`/ArgoCD sync just run again against a fresh cluster.
 
-## 1.6 Try it
+## Try it
 
 ```sh
 kind delete cluster --name lab
@@ -120,4 +121,4 @@ kind create cluster --name lab --config k8s/kind-config.yaml
 kubectl get nodes
 ```
 
-Confirm you can tear down and rebuild the cluster in under a minute before moving on — this is the loop you'll be running constantly through chapter 8, it needs to be fast and unremarkable, not something to think about each time.
+Confirm you can tear down and rebuild the cluster in under a minute before moving on: this is the loop you'll be running constantly through [Miniflux, end to end](miniflux-deployment.md), it needs to be fast and unremarkable, not something to think about each time.
