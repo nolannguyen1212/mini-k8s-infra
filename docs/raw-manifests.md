@@ -1,4 +1,4 @@
-# The first real objects, by hand
+# Raw manifests
 
 - One real app: [Miniflux](https://miniflux.app), an RSS reader, official public image `miniflux/miniflux`, backed by one real Postgres instance
 - Both by hand, raw YAML, no Helm yet ([Helm: charting Postgres and Miniflux](helm-charts.md) charts these same objects)
