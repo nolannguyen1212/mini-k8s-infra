@@ -1,0 +1,39 @@
+# render: d2 --layout=tala vault-agent-injection.d2 vault-agent-injection.svg
+direction: right
+
+request: "Pod applied\n(helm / ArgoCD)"
+
+k8s: "Kubernetes control plane" {
+  direction: down
+  icon: https://cdn.simpleicons.org/kubernetes
+  apiserver: "kube-apiserver"
+  scheduler: "scheduler"
+  apiserver -> scheduler: "places Pod on node"
+}
+
+vault: "Vault" {
+  direction: down
+  icon: https://cdn.simpleicons.org/vault
+  injector: "Agent Injector\n(mutating webhook)"
+  server: "Vault server\n(KV v2 + auth/kubernetes)"
+}
+
+pod: "Pod" {
+  direction: down
+  init: "Vault Agent\ninit container"
+  secretfile: "/vault/secrets/*"
+  main: "app container\nexecs"
+  sidecar: "Vault Agent\nsidecar"
+  init -> secretfile: "template rendered"
+  secretfile -> main: ". file && exec"
+  sidecar -> secretfile: "re-render on change,\nno restart"
+}
+
+request -> k8s.apiserver: "create Pod"
+k8s.apiserver -> vault.injector: "mutating admission call"
+vault.injector -> k8s.apiserver: "adds init + sidecar to spec"
+k8s.scheduler -> pod.init: "kubelet runs init\ncontainer first"
+pod.init -> vault.server: "authenticate:\nSA token, role=<app>"
+vault.server -> k8s.apiserver: "TokenReview:\nvalidate SA identity"
+vault.server -> pod.init: "policy check passes,\nsecret returned"
+pod.sidecar -> vault.server: "poll / renew lease"

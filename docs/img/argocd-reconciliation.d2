@@ -1,0 +1,35 @@
+# render: d2 --layout=tala argocd-reconciliation.d2 argocd-reconciliation.svg
+direction: right
+
+user: "user"
+
+git: "Git repo" {
+  icon: https://cdn.simpleicons.org/git
+}
+
+argocd: "ArgoCD" {
+  direction: down
+  icon: https://cdn.simpleicons.org/argo
+  repserver: "repo-server\n(render)"
+  appctrl: "application-controller\n(diff)"
+  repserver -> appctrl: "kustomize build\n--enable-helm"
+}
+
+k8s: "Kubernetes control plane" {
+  direction: down
+  icon: https://cdn.simpleicons.org/kubernetes
+  apiserver: "apiserver"
+  etcd: "etcd" {
+    icon: https://cdn.simpleicons.org/etcd
+  }
+  controllers: "controllers +\nkubelet"
+  live: "live state\n(Deployments, Pods, ...)"
+  apiserver -> etcd: "persists desired state"
+  apiserver -> controllers: "notifies watchers"
+  controllers -> live: "reconcile:\nobjects actually run"
+}
+
+user -> git: "git push"
+git -> argocd.repserver: "polled (or webhook)"
+argocd.appctrl -> k8s.apiserver: "diff vs live,\napply if out of sync"
+k8s.live -> argocd.appctrl: "compared back continuously\n(selfHeal)"

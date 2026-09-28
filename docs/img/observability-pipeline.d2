@@ -1,0 +1,46 @@
+# render: d2 --layout=tala observability-pipeline.d2 observability-pipeline.svg
+direction: right
+
+workloads: "Application workloads" {
+  direction: down
+  miniflux: "Miniflux\n/metrics"
+  postgres: "Postgres +\npostgres_exporter" {
+    icon: https://cdn.simpleicons.org/postgresql
+  }
+}
+
+k8s: "Kubernetes" {
+  direction: down
+  icon: https://cdn.simpleicons.org/kubernetes
+  svcmon: "ServiceMonitor"
+  kubelet: "kubelet\n(stdout/stderr)"
+}
+
+stack: "kube-prometheus-stack" {
+  direction: down
+  icon: https://cdn.simpleicons.org/prometheus
+  prometheus: "Prometheus"
+  alertmanager: "Alertmanager"
+  prometheus -> alertmanager: "rule fires"
+}
+
+logs: "Log pipeline" {
+  direction: down
+  promtail: "Promtail\n(DaemonSet)"
+  loki: "Loki"
+  promtail -> loki: "ships log lines"
+}
+
+grafana: "Grafana" {
+  icon: https://cdn.simpleicons.org/grafana
+}
+
+webhook: "webhook\nreceiver"
+
+workloads.miniflux -> k8s.svcmon: "scraped every 30s"
+workloads.postgres -> k8s.svcmon: "scraped :9187"
+k8s.svcmon -> stack.prometheus: "tells Operator\nwhere to scrape"
+k8s.kubelet -> logs.promtail: "tails container logs"
+stack.prometheus -> grafana: "queried (PromQL)"
+logs.loki -> grafana: "queried (LogQL)"
+stack.alertmanager -> webhook: "notification"

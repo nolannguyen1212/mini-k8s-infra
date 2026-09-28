@@ -4,6 +4,12 @@
 - This chapter installs the controller that actually makes it true: ArgoCD watches a git repo, renders whatever it finds there, and continuously reconciles the live cluster to match
 - The same reconciliation-loop idea behind a Deployment or a StatefulSet, now applied to "does the cluster match git" instead of "does the Pod count match the spec"
 
+## The reconciliation loop, with etcd in the picture
+
+<img src="img/argocd-reconciliation.svg" alt="Git feeds an ArgoCD cluster (repo-server renders with kustomize build --enable-helm, application-controller diffs against live state) which feeds a Kubernetes control plane cluster: apiserver applies, persists desired state to etcd, and notifies controllers and the kubelet, which reconcile it into actually-running Deployments and Pods. Live cluster state loops back to application-controller continuously, which is what selfHeal relies on." width="460">
+
+`argocd-repo-server` and `argocd-application-controller` are two separate Pods with two separate jobs: rendering never talks to the live cluster, diffing never renders. Neither one writes to etcd directly — that's `kube-apiserver`'s job alone, same as `kubectl apply` always was; ArgoCD's own contribution is deciding *when* to call it and *reverting* whatever the API server reports back that diverges from git.
+
 ## Install via Helm
 
 ```sh

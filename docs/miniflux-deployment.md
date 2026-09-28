@@ -5,7 +5,7 @@
 
 ## The full reconciliation chain
 
-<img src="img/reconciliation-chain.svg" alt="The full reconciliation chain: commit pushed to git, ArgoCD polls and detects the diff, renders with kustomize build --enable-helm, applies manifests, the Deployment controller reconciles the Pod spec, the scheduler places the Pod on a node, the Vault Injector acts before the container starts, adding an init container and sidecar, and the init container renders /vault/secrets/* before Miniflux starts." width="280">
+<img src="img/reconciliation-chain.svg" alt="Four clusters chained left to right, each labeled with its owning technology's icon. Git: commit + push. ArgoCD: polls and detects the diff, then runs kustomize build --enable-helm. Kubernetes control plane: apiserver applies manifests, the Deployment controller reconciles the Pod spec, the scheduler places the Pod on a node. Vault: the Agent Injector webhook adds an init container that renders /vault/secrets/* before the Miniflux container execs." width="420">
 
 `Render` is `argocd-repo-server` running `kustomize build --enable-helm --load-restrictor LoadRestrictionsNone`: the same command [Kustomize inflating a Helm chart](kustomize-helm-inflation.md) and [Vault: secrets as a live service, not a file in git](vault-secrets.md) already ran by hand, no decryption step, nothing Vault-aware at this stage. `Vault Injector` is the mutating webhook rewriting the Pod at admission ([Policies and roles, scoped per app](vault-secrets.md#policies-and-roles-scoped-per-app)'s role), not a step ArgoCD or kustomize knows anything about.
 

@@ -13,6 +13,12 @@
 - Vault instead injects at **admission time**: a mutating webhook watches for a specific annotation on a Pod spec, and rewrites the Pod to add an init container (and a sidecar) that authenticates to Vault using the Pod's own identity and writes the secret to a file inside the Pod, before the main container ever starts
 - Nothing about `kustomize build` or ArgoCD changes because of this: [ArgoCD: git becomes the source of truth](argocd.md)'s ArgoCD install ends up simpler than a SOPS-based one would, since it never needs to hold a decryption key at all
 
+## The injection flow, end to end
+
+<img src="img/vault-agent-injection.svg" alt="Three clusters: Kubernetes control plane, Vault, and the Pod itself. A Pod is applied to kube-apiserver, which calls Vault's Agent Injector as a mutating admission webhook; the injector adds an init container and sidecar to the Pod spec before the scheduler places it. Inside the Pod, the init container authenticates to the Vault server with the Pod's ServiceAccount token; Vault calls back to kube-apiserver's TokenReview API to validate that identity, then checks the policy bound to the role. If allowed, Vault returns the secret, the init container renders it to /vault/secrets/*, and the app container sources that file and execs. The sidecar keeps polling Vault and re-rendering the file for the Pod's whole lifetime." width="620">
+
+Everything below walks through building each piece of this picture by hand. `kube-apiserver` and the scheduler are ordinary Kubernetes, already familiar; the only genuinely new component is the Injector and the two containers it adds.
+
 ## Install Vault (dev mode)
 
 `scripts/vault-setup.sh`, called automatically by `make cluster` ([scripts/cluster-setup.sh](local-cluster-setup.md#scriptscluster-setupsh-and-what-it-actually-does)) — by the time you're reading this, it has likely already run once. Walk through what it actually does:

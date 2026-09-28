@@ -1,20 +1,40 @@
-commit: "Commit"
-push: "Push"
-argocd: "ArgoCD"
-render: "Render"
-apply: "Apply"
-deploy: "Deployment"
-schedule: "Scheduler"
-inject: "Vault Injector"
-init: "Init container"
-start: "Miniflux"
+# render: d2 --layout=tala reconciliation-chain.d2 reconciliation-chain.svg
+direction: right
 
-commit -> push: "git push"
-push -> argocd: "polls, detects diff"
-argocd -> render: "kustomize build --enable-helm"
-render -> apply: "applies manifests"
-apply -> deploy: "reconciles Pod spec"
-deploy -> schedule: "places Pod on node"
-schedule -> inject: "before container starts"
-inject -> init: "adds init + sidecar"
-init -> start: "renders /vault/secrets/*, sourced then exec'd"
+git: "Git" {
+  direction: down
+  icon: https://cdn.simpleicons.org/git
+  repo: "commit + push"
+}
+
+argocd: "ArgoCD" {
+  direction: down
+  icon: https://cdn.simpleicons.org/argo
+  sync: "polls, detects diff"
+  render: "kustomize build\n--enable-helm"
+  sync -> render
+}
+
+k8s: "Kubernetes control plane" {
+  direction: down
+  icon: https://cdn.simpleicons.org/kubernetes
+  apiserver: "apiserver\napplies manifests"
+  controller: "Deployment controller\nreconciles Pod spec"
+  scheduler: "Scheduler\nplaces Pod on node"
+  apiserver -> controller -> scheduler
+}
+
+vault: "Vault" {
+  direction: down
+  icon: https://cdn.simpleicons.org/vault
+  injector: "Agent Injector\n(webhook)"
+  init: "init container\nrenders /vault/secrets/*"
+  injector -> init: "adds init + sidecar"
+}
+
+miniflux: "Miniflux\ncontainer execs"
+
+git.repo -> argocd.sync: "git push"
+argocd.render -> k8s.apiserver: "applies manifests"
+k8s.scheduler -> vault.injector: "before container starts"
+vault.init -> miniflux: "sourced, then exec'd"

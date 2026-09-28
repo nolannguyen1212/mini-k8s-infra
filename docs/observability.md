@@ -5,6 +5,12 @@
 - This chapter installs `metrics-server` for basic resource numbers, then Prometheus + Grafana (via the `kube-prometheus-stack` Helm chart) to scrape and graph Miniflux's own `/metrics`
 - It goes on to instrument Postgres too, centralize logs with Loki, and turn one Prometheus rule into an actual notification, not just metrics sitting in a dashboard nobody's watching
 
+## The pipeline, end to end
+
+<img src="img/observability-pipeline.svg" alt="Application workloads cluster (Miniflux, Postgres + postgres_exporter) is scraped through a ServiceMonitor inside the Kubernetes cluster, which tells the Prometheus Operator where to scrape inside the kube-prometheus-stack cluster. Prometheus is queried by Grafana over PromQL, and its rules feed Alertmanager, which sends notifications to a webhook receiver. Separately, the kubelet inside the Kubernetes cluster feeds a Log pipeline cluster: a Promtail DaemonSet tails container logs, ships them to Loki, which Grafana queries over LogQL." width="480">
+
+Two independent lanes, built up separately below: metrics (left) needed Miniflux and Postgres to expose something scrapeable first; logs (right) needed nothing from either app, since the kubelet writes every container's stdout/stderr regardless. Both lanes end up queried from the same Grafana, through two different query languages against two different datasources.
+
 ## metrics-server: making `kubectl top` real
 
 Every `kubectl top` command so far would have failed silently with "Metrics API not available": nothing collects resource metrics by default, kind included.
