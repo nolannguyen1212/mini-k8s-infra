@@ -247,7 +247,7 @@ The `-secret-<name>`/`-template-<name>` suffix (`postgres`, `miniflux`) is what 
 ```sh
 helm upgrade --install postgres charts/postgres -n platform
 kubectl rollout status statefulset/postgres -n platform
-kubectl get pod postgres-0 -n platform     # 3/3 Ready: postgres + vault-agent-init (completed) + vault-agent (sidecar)
+kubectl get pod postgres-0 -n platform     # 2/2 Ready: postgres + vault-agent (sidecar) — vault-agent-init is an init container, it runs once and completes, so it never counts toward READY
 kubectl exec postgres-0 -n platform -c postgres -- printenv | grep -E "POSTGRES_PASSWORD|MINIFLUX_DB_PASSWORD"
 
 helm upgrade --install miniflux charts/miniflux -n miniflux
