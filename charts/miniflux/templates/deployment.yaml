@@ -7,21 +7,45 @@ spec:
   replicas: {{ .Values.replicas }}
   selector:
     matchLabels: { app: {{ .Release.Name }} }
+
   template:
     metadata:
       labels: { app: {{ .Release.Name }} }
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "miniflux"
+        vault.hashicorp.com/agent-inject-secret-postgres: "secret/data/platform/postgres"
+        vault.hashicorp.com/agent-inject-template-postgres: |
+          {{`{{- with secret "secret/data/platform/postgres" -}}`}}
+          export DATABASE_URL="postgres://miniflux:{{`{{ .Data.data.MINIFLUX_DB_PASSWORD }}`}}@postgres.platform.svc.cluster.local:5432/miniflux?sslmode=disable"
+          {{`{{- end }}`}}
+        vault.hashicorp.com/agent-inject-secret-miniflux: "secret/data/miniflux"
+        vault.hashicorp.com/agent-inject-template-miniflux: |
+          {{`{{- with secret "secret/data/miniflux" -}}`}}
+          export ADMIN_USERNAME="{{`{{ .Data.data.ADMIN_USERNAME }}`}}"
+          export ADMIN_PASSWORD="{{`{{ .Data.data.ADMIN_PASSWORD }}`}}"
+          {{`{{- end }}`}}
+
     spec:
+      serviceAccountName: {{ .Release.Name }}
       containers:
         - name: miniflux
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: IfNotPresent
+
+          command: ["sh", "-c"]
+          args:
+            - |
+              . /vault/secrets/postgres
+              . /vault/secrets/miniflux
+              exec miniflux
+
           ports:
             - { name: http, containerPort: 8080 }
           env:
             - { name: RUN_MIGRATIONS, value: "1" }
             - { name: CREATE_ADMIN, value: "1" }
-          envFrom:
-            - secretRef: { name: miniflux-secret }
+
           resources:
 {{ toYaml .Values.resources | indent 12 }}
           readinessProbe:

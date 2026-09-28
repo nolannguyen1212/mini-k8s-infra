@@ -11,20 +11,37 @@ spec:
   replicas: 1
   selector: 
     matchLabels: { app: {{ .Release.Name }} }
+
   template:
     metadata:
       labels: { app: {{ .Release.Name }} }
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "postgres"
+        vault.hashicorp.com/agent-inject-secret-postgres: "secret/data/platform/postgres"
+        vault.hashicorp.com/agent-inject-template-postgres: |
+          {{`{{- with secret "secret/data/platform/postgres" -}}`}}
+          export POSTGRES_PASSWORD="{{`{{ .Data.data.POSTGRES_PASSWORD }}`}}"
+          export MINIFLUX_DB_PASSWORD="{{`{{ .Data.data.MINIFLUX_DB_PASSWORD }}`}}"
+          {{`{{- end }}`}}
+
     spec:
+      serviceAccountName: {{ .Release.Name }}
       containers:
         - name: postgres
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+
+          command: ["sh", "-c"]
+          args:
+            - |
+              . /vault/secrets/postgres
+              exec docker-entrypoint.sh postgres
+
           ports:
             - containerPort: 5432
           env:
             - name: POSTGRES_USER
               value: postgres
-          envFrom:
-            - secretRef: { name: postgres-secret }
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data, subPath: pgdata }
             - { name: init, mountPath: /docker-entrypoint-initdb.d }
