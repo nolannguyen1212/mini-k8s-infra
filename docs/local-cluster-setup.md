@@ -58,7 +58,7 @@ Pin an exact controller release instead of `main`, since an unpinned branch refe
 
 ## Cluster config for later chapters
 
-The default `kind create cluster` has no port mappings, so an Ingress controller inside it is unreachable from your host machine. Miniflux's Ingress ([The first real objects, by hand](first-objects-by-hand.md)) needs `extraPortMappings`. `config/kind/kind-config.yaml`:
+The default `kind create cluster` has no port mappings, so an Ingress controller inside it is unreachable from your host machine. Miniflux's Ingress ([Raw manifests](raw-manifests.md)) needs `extraPortMappings`. `config/kind/kind-config.yaml`:
 
 ```yaml
 kind: Cluster

@@ -3,7 +3,7 @@
 - Every `kubectl apply` in [Local development cluster (kind)](local-cluster-setup.md) was you, running a command from your laptop
 - GitOps flips this: a controller running inside the cluster continuously watches a git repository, and whatever is committed there is what gets applied, automatically, on every change
 - Git becomes the single source of truth, not your shell history
-- [ArgoCD: git becomes the source of truth](argocd.md) installs that controller for real; this chapter lays out the repo shape everything from [The first real objects, by hand](first-objects-by-hand.md) onward gets written into, so nothing later needs a detour to explain "why does this file live here"
+- [ArgoCD: git becomes the source of truth](argocd.md) installs that controller for real; this chapter lays out the repo shape everything from [Raw manifests](raw-manifests.md) onward gets written into, so nothing later needs a detour to explain "why does this file live here"
 
 ## The full repo, decided up front
 
@@ -26,7 +26,7 @@ environments/
   networkpolicy-platform-allow-consumers.yaml
 ```
 
-No separate repo to create: `k8s/` ([The first real objects, by hand](first-objects-by-hand.md)'s hand-applied exercise), `charts/`, `apps/`, and everything below live directly in this repo, alongside `docs/` itself.
+No separate repo to create: `k8s/` ([Raw manifests](raw-manifests.md)'s hand-applied exercise), `charts/`, `apps/`, and everything below live directly in this repo, alongside `docs/` itself.
 
 No `.sops.yaml`, no `age/` keypair, no encrypted files anywhere in this tree. [Vault: secrets as a live service, not a file in git](vault-secrets.md) deploys Vault as its own workload and secrets never sit in git in any form, encrypted or not: a Pod fetches its secret from Vault directly at startup, over the network, inside the cluster. That single decision is what removes SOPS+age's central cost from this repo entirely: rotating a secret later is a `vault kv put`, not a file edit plus a commit.
 

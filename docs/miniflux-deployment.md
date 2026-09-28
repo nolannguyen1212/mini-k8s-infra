@@ -1,6 +1,6 @@
 # Miniflux, end to end
 
-- [The first real objects, by hand](first-objects-by-hand.md), [Helm: charting Postgres and Miniflux](helm-charts.md), [Kustomize inflating a Helm chart](kustomize-helm-inflation.md), [Vault: secrets as a live service, not a file in git](vault-secrets.md), and [ArgoCD: git becomes the source of truth](argocd.md) built every piece (raw objects, a Helm chart, a Kustomize overlay, a Vault-backed secret, an ArgoCD Application) against Miniflux specifically, one piece at a time
+- [Raw manifests](raw-manifests.md), [Helm: charting Postgres and Miniflux](helm-charts.md), [Kustomize inflating a Helm chart](kustomize-helm-inflation.md), [Vault: secrets as a live service, not a file in git](vault-secrets.md), and [ArgoCD: git becomes the source of truth](argocd.md) built every piece (raw objects, a Helm chart, a Kustomize overlay, a Vault-backed secret, an ArgoCD Application) against Miniflux specifically, one piece at a time
 - This chapter is the capstone: the full chain in one picture, Miniflux's own operational knobs worth knowing, and the failure-mode tests that actually prove the stack, not just that the Pods are `Running`
 
 ## The full reconciliation chain
@@ -9,11 +9,11 @@
 
 `Render` is `argocd-repo-server` running `kustomize build --enable-helm --load-restrictor LoadRestrictionsNone`: the same command [Kustomize inflating a Helm chart](kustomize-helm-inflation.md) and [Vault: secrets as a live service, not a file in git](vault-secrets.md) already ran by hand, no decryption step, nothing Vault-aware at this stage. `Vault Injector` is the mutating webhook rewriting the Pod at admission ([Policies and roles, scoped per app](vault-secrets.md#policies-and-roles-scoped-per-app)'s role), not a step ArgoCD or kustomize knows anything about.
 
-Five independent reconciliation loops stacked here: ArgoCD (git to cluster objects), the Deployment controller (spec to Pods), the scheduler+kubelet (Pod spec to a running container), the Vault Agent Injector (an admission-time mutation, one-shot per Pod creation), and the Vault Agent sidecar itself (keeps re-rendering for the Pod's whole lifetime, [Try it](vault-secrets.md#try-it)). Each layer only cares about the layer directly below it: a stuck rollout is a [The first real objects, by hand](first-objects-by-hand.md) problem, a stuck sync is an [ArgoCD: git becomes the source of truth](argocd.md) problem, a Pod stuck in `Init` with the wrong env var is a [Vault: secrets as a live service, not a file in git](vault-secrets.md) problem. They don't need to be reasoned about all at once.
+Five independent reconciliation loops stacked here: ArgoCD (git to cluster objects), the Deployment controller (spec to Pods), the scheduler+kubelet (Pod spec to a running container), the Vault Agent Injector (an admission-time mutation, one-shot per Pod creation), and the Vault Agent sidecar itself (keeps re-rendering for the Pod's whole lifetime, [Try it](vault-secrets.md#try-it)). Each layer only cares about the layer directly below it: a stuck rollout is a [Raw manifests](raw-manifests.md) problem, a stuck sync is an [ArgoCD: git becomes the source of truth](argocd.md) problem, a Pod stuck in `Init` with the wrong env var is a [Vault: secrets as a live service, not a file in git](vault-secrets.md) problem. They don't need to be reasoned about all at once.
 
 ## Miniflux's own configuration surface
 
-Beyond the four secret-backed variables already wired up, Miniflux reads a number of plain (non-secret) env vars that shape how it actually behaves as an RSS reader, not just whether it starts. Worth setting deliberately in `charts/miniflux/values-prod.yaml` rather than leaving at their defaults: verify the exact current names against Miniflux's own README before trusting any of these on a version far from what this was written against, the same caveat as [Miniflux](first-objects-by-hand.md#miniflux)'s `/healthcheck` path:
+Beyond the four secret-backed variables already wired up, Miniflux reads a number of plain (non-secret) env vars that shape how it actually behaves as an RSS reader, not just whether it starts. Worth setting deliberately in `charts/miniflux/values-prod.yaml` rather than leaving at their defaults: verify the exact current names against Miniflux's own README before trusting any of these on a version far from what this was written against, the same caveat as [Miniflux](raw-manifests.md#miniflux)'s `/healthcheck` path:
 
 ```yaml
 env:
@@ -25,7 +25,7 @@ env:
   METRICS_COLLECTOR: "1"           # exposes /metrics for Prometheus, off by default
 ```
 
-Add an `env:` loop to `charts/miniflux/templates/deployment.yaml` (alongside the existing `RUN_MIGRATIONS`/`CREATE_ADMIN` pair from [Miniflux](first-objects-by-hand.md#miniflux)) to consume this:
+Add an `env:` loop to `charts/miniflux/templates/deployment.yaml` (alongside the existing `RUN_MIGRATIONS`/`CREATE_ADMIN` pair from [Miniflux](raw-manifests.md#miniflux)) to consume this:
 
 ```yaml
 env:
@@ -52,7 +52,7 @@ kubectl logs -n miniflux deploy/miniflux -c miniflux --tail=50 | grep -i "refres
 
 ## Prove the failure modes, not just the happy path
 
-**Postgres restart, data survives (StatefulSet, [Postgres](first-objects-by-hand.md#postgres)):**
+**Postgres restart, data survives (StatefulSet, [Postgres](raw-manifests.md#postgres)):**
 ```sh
 kubectl delete pod postgres-0 -n platform
 kubectl wait --for=condition=Ready pod/postgres-0 -n platform --timeout=60s

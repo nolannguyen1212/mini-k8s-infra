@@ -1,6 +1,6 @@
 # Vault: secrets as a live service, not a file in git
 
-- [The first real objects, by hand](first-objects-by-hand.md) put two plaintext passwords straight into `Secret` manifests
+- [Raw manifests](raw-manifests.md) put two plaintext passwords straight into `Secret` manifests
 - Those manifests cannot go into git as-is: base64 is not encryption, anyone who can read the file (or the git history, forever) has the credential
 - A common alternative to what's built here is SOPS+age: encrypt the file, commit the ciphertext, decrypt at render time
 - This repo uses Vault instead: secrets never exist as a file, encrypted or not, anywhere in git
@@ -90,7 +90,7 @@ vault kv put secret/miniflux \
 vault kv get secret/platform/postgres
 ```
 
-Notice `DATABASE_URL` is not written anywhere: [The Agent Injector annotations, and the templating-inside-templating gotcha](#the-agent-injector-annotations-and-the-templating-inside-templating-gotcha) composes it inside the Pod, at injection time, directly from `secret/platform/postgres`'s `MINIFLUX_DB_PASSWORD`. That's the specific thing that removes [The first real objects, by hand](first-objects-by-hand.md)'s two-copies-of-one-password problem: Miniflux's Vault Agent reads the **same path** Postgres's does, instead of a second, independently-maintained copy of the value.
+Notice `DATABASE_URL` is not written anywhere: [The Agent Injector annotations, and the templating-inside-templating gotcha](#the-agent-injector-annotations-and-the-templating-inside-templating-gotcha) composes it inside the Pod, at injection time, directly from `secret/platform/postgres`'s `MINIFLUX_DB_PASSWORD`. That's the specific thing that removes [Raw manifests](raw-manifests.md)'s two-copies-of-one-password problem: Miniflux's Vault Agent reads the **same path** Postgres's does, instead of a second, independently-maintained copy of the value.
 
 ## Policies and roles, scoped per app
 
