@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+
+kind: Application
+
+metadata:
+  name: miniflux
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/nolannguyen1212/mini-k8s-infra.git
+    targetRevision: master
+    path: apps/miniflux
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: miniflux
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: ["CreateNamespace=true"]

@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+
+kind: AppProject
+
+metadata:
+  name: default
+  namespace: argocd
+
+spec:
+  sourceRepos:
+    - "https://github.com/nolannguyen1212/mini-k8s-infra.git"
+  destinations:
+    - { namespace: argocd, server: https://kubernetes.default.svc }
+    - { namespace: platform, server: https://kubernetes.default.svc }
+    - { namespace: miniflux, server: https://kubernetes.default.svc }
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
