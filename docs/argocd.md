@@ -82,7 +82,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/<your-user>/mini-k8s-infra.git
-    targetRevision: main
+    targetRevision: master
     path: environments
   destination:
     server: https://kubernetes.default.svc
@@ -90,7 +90,7 @@ spec:
     automated: { prune: true, selfHeal: true }
 ```
 
-`argocd/apps/platform-postgres.yaml`:
+`argocd/apps/platform/postgres.yaml`: nested under `platform/` rather than a flat `platform-postgres.yaml`, because `platform` will hold more than just Postgres — every future platform-tier workload gets its own file alongside this one instead of growing a pile of hyphenated names in `argocd/apps/`.
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -104,7 +104,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/<your-user>/mini-k8s-infra.git
-    targetRevision: main
+    targetRevision: master
     path: apps/platform/postgres
   destination:
     server: https://kubernetes.default.svc
@@ -128,7 +128,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/<your-user>/mini-k8s-infra.git
-    targetRevision: main
+    targetRevision: master
     path: apps/miniflux
   destination:
     server: https://kubernetes.default.svc
@@ -157,7 +157,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/<your-user>/mini-k8s-infra.git
-    targetRevision: main
+    targetRevision: master
     path: argocd/apps
     directory:
       recurse: true
